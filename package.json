@@ -1,0 +1,23 @@
+{
+  "name": "hellapagos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm -w @hellapagos/server run dev",
+    "dev:client": "npm -w @hellapagos/client run dev",
+    "build": "npm -w @hellapagos/client run build",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm -w @hellapagos/shared run test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.6.3"
+  }
+}

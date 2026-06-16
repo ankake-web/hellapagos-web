@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.gitignore
+*.log
+packages/server/data
+shots.mjs
+smoke.mjs
+.DS_Store
+.vite

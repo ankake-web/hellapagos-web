@@ -1,0 +1,16 @@
+# Render Blueprint（https://render.com）
+# リポジトリを Render に接続し「Blueprint」で本ファイルを読み込むと自動構成される。
+services:
+  - type: web
+    name: hellapagos
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false
+    # 無料プランはディスクが揮発するため、再デプロイ/再起動でランキングはリセットされる。
+    # 永続化する場合は有料の Disk を /app/packages/server/data にマウントする。
+    # disk:
+    #   name: hellapagos-data
+    #   mountPath: /app/packages/server/data
+    #   sizeGB: 1
