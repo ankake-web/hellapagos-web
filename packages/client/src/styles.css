@@ -1002,3 +1002,30 @@ button {
   padding: 0.45rem 0.5rem; border-radius: 8px; border: 1px solid var(--line);
   background: #0e333b; color: var(--ink); font-family: inherit;
 }
+
+/* ===== 袋引き演出・天候 ===== */
+.draw-pop {
+  position: fixed; top: 30%; left: 50%; transform: translateX(-50%);
+  z-index: 16; text-align: center; pointer-events: none;
+  background: rgba(8,22,27,0.92); border: 1px solid var(--line);
+  border-radius: 14px; padding: 0.7rem 1.1rem; box-shadow: 0 10px 34px rgba(0,0,0,0.5);
+}
+.draw-who { font-size: 0.78rem; color: var(--muted); }
+.balls { display: flex; gap: 0.4rem; margin-top: 0.4rem; justify-content: center; }
+.ball {
+  width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 1.1rem;
+  background: radial-gradient(circle at 35% 30%, #fff, #d9c79a);
+  color: #5a4a18; border: 2px solid #b8a878;
+  animation: ballin 0.3s ease-out both;
+}
+.ball.snake {
+  background: radial-gradient(circle at 35% 30%, #444, #111);
+  color: #fff; border-color: #000;
+}
+@keyframes ballin { from { transform: scale(0) rotate(-30deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
+
+.board.w-rain { background: radial-gradient(900px 300px at 50% -5%, rgba(86,204,242,0.10), transparent 60%); border-radius: 14px; }
+.board.w-storm { background: radial-gradient(900px 360px at 50% -5%, rgba(235,87,87,0.12), transparent 60%); }
+.board.w-storm .header { box-shadow: 0 0 0 1px var(--danger) inset; }

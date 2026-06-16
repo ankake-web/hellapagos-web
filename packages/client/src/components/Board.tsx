@@ -54,10 +54,12 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
     setTargeting(null);
   };
 
+  const weatherClass = view.hurricaneRevealed ? 'w-storm' : view.currentPrecip === 0 ? 'w-sunny' : 'w-rain';
   return (
-    <div className="board">
+    <div className={`board ${weatherClass}`}>
       <Header view={view} />
       <RoundSplash view={view} />
+      <DrawResult view={view} />
       <EventBanner view={view} />
       {targeting && (
         <div className="banner target">
@@ -366,6 +368,36 @@ function RoundSplash({ view }: { view: PublicGameState }) {
         <span className="ds-day">{view.round}ラウンド</span>
         <span className="ds-weather">{weatherLabel(view)}</span>
         {view.hurricaneRevealed && <span className="ds-storm">ハリケーン！</span>}
+      </div>
+    </div>
+  );
+}
+
+/** 袋から引いた玉の演出（魚の数 / 黒玉=ヘビ） */
+function DrawResult({ view }: { view: PublicGameState }) {
+  const d = view.lastDraw;
+  const newest = view.log.length ? view.log[view.log.length - 1].id : -1;
+  const sig = d ? `${d.playerId}|${d.action}|${d.balls.length}|${newest}` : '';
+  const [shown, setShown] = useState('');
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!d || !d.balls.length || sig === shown) return;
+    setShown(sig);
+    setVisible(true);
+    const id = window.setTimeout(() => setVisible(false), 1500);
+    return () => window.clearTimeout(id);
+  }, [sig, shown, d]);
+  if (!d || !visible || !d.balls.length) return null;
+  const who = view.players.find((p) => p.id === d.playerId)?.name ?? '';
+  return (
+    <div className="draw-pop">
+      <span className="draw-who">{who} の{d.action === 'fish' ? '釣り' : '木集め'}</span>
+      <div className="balls">
+        {d.balls.map((b, i) => (
+          <span key={i} className={`ball ${'snake' in b ? 'snake' : ''}`} style={{ animationDelay: `${i * 0.12}s` }}>
+            {'snake' in b ? '🐍' : (b as { fish: number }).fish}
+          </span>
+        ))}
       </div>
     </div>
   );
