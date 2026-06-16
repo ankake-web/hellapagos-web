@@ -20,17 +20,32 @@ docker run -p 8787:8787 hellapagos
 
 ---
 
-## A. Render（最も簡単・無料あり）
+## A. Render（最も簡単・無料あり／Node ランタイム）
 
-1. このリポジトリを GitHub に push。
-2. [Render](https://render.com) で **New → Blueprint**、リポジトリを選択（同梱の `render.yaml` を自動検出）。
-   - もしくは **New → Web Service**、`Runtime: Docker`、`Health Check Path: /health` を手動設定。
-3. デプロイ完了後、`https://<service>.onrender.com` で公開。
-4. 動作確認：`/health` が `{"ok":true}`、トップでルーム作成→AI追加→開始。
+### 方法1：手動で Web Service（最も確実・推奨）
+
+1. [Render](https://render.com) で **New → Web Service**。
+2. リポジトリ `ankake-web/hellapagos-web` を接続。
+3. 以下を設定：
+   - **Runtime**: `Node`
+   - **Build Command**: `npm ci --include=dev && npm run build`
+   - **Start Command**: `npm run start -w @hellapagos/server`
+   - **Health Check Path**: `/health`
+   - **Instance Type**: Free
+4. **Create Web Service** をクリック → ビルド〜デプロイ（数分）。
+5. ページ上部のURL（`https://hellapagos-xxxx.onrender.com`）で公開。
+
+### 方法2：Blueprint（render.yaml 自動構成）
+
+1. **New → Blueprint** → リポジトリを選択（`render.yaml` を検出）。
+2. プレビューに `hellapagos` が出たら **Apply / Create Services** を必ずクリック（ここを押さないと作成されない）。
+
+動作確認：`/health` が `{"ok":true}`、トップでルーム作成→AI追加→開始。
 
 メモ:
 - 無料プランはアイドルでスリープ（初回アクセスが数十秒遅い）。
-- 無料はディスクが揮発するため**ランキングは再デプロイでリセット**。永続化するなら Disk を `/app/packages/server/data` にマウント（`render.yaml` のコメント参照）。
+- 無料はディスクが揮発するため**ランキングは再デプロイでリセット**。永続化するなら Disk を `/opt/render/project/src/packages/server/data` にマウント。
+- `tsx` 等の devDependencies はビルド時に入り、その node_modules が実行時にも使われる（`--include=dev` で確実に導入）。
 
 ## B. Fly.io（Volume で永続化しやすい）
 

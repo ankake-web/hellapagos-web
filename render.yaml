@@ -1,16 +1,18 @@
-# Render Blueprint（https://render.com）
-# リポジトリを Render に接続し「Blueprint」で本ファイルを読み込むと自動構成される。
+# Render Blueprint（https://render.com）— Node ランタイム
+# リポジトリを Render に接続し Blueprint で読み込むと自動構成される。
+# 既存の他サービスと同じ Node 環境（Docker不要）。
 services:
   - type: web
     name: hellapagos
-    env: docker
+    runtime: node
     plan: free
-    dockerfilePath: ./Dockerfile
+    region: oregon
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start -w @hellapagos/server
     healthCheckPath: /health
     autoDeploy: false
-    # 無料プランはディスクが揮発するため、再デプロイ/再起動でランキングはリセットされる。
-    # 永続化する場合は有料の Disk を /app/packages/server/data にマウントする。
-    # disk:
-    #   name: hellapagos-data
-    #   mountPath: /app/packages/server/data
-    #   sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.0"
+    # 無料プランはディスクが揮発するため、再デプロイでランキングはリセットされる。
+    # 永続化する場合は有料 Disk を /opt/render/project/src/packages/server/data にマウント。
