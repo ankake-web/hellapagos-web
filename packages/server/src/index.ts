@@ -83,20 +83,18 @@ io.on('connection', (socket) => {
 
   socket.on('room:addBot', () => guard(socket.id, () => manager.addBot(socket.id)));
   socket.on('room:removeBot', ({ botId }) => guard(socket.id, () => manager.removeBot(socket.id, botId)));
-  socket.on('game:setConfig', ({ soleSurvivor }) =>
-    guard(socket.id, () => manager.setConfig(socket.id, soleSurvivor)),
-  );
+  socket.on('game:setConfig', (p) => guard(socket.id, () => manager.setRoomConfig(socket.id, p)));
   socket.on('game:start', () => guard(socket.id, () => manager.startGame(socket.id)));
 
-  socket.on('action:choose', ({ action }) => guard(socket.id, () => manager.submitAction(socket.id, action)));
-  socket.on('survival:contribute', ({ food, water }) =>
-    guard(socket.id, () => manager.submitContribute(socket.id, { food, water })),
+  socket.on('action:choose', ({ action, woodPush }) =>
+    guard(socket.id, () => manager.submitAction(socket.id, action, woodPush ?? 0)),
   );
+  socket.on('card:play', ({ cardId, targetId }) =>
+    guard(socket.id, () => manager.submitCard(socket.id, cardId, targetId)),
+  );
+  socket.on('survival:pass', () => guard(socket.id, () => manager.submitSurvivalPass(socket.id)));
   socket.on('vote:cast', ({ targetId }) => guard(socket.id, () => manager.submitVote(socket.id, targetId)));
-  socket.on('escape:vote', ({ leave }) => guard(socket.id, () => manager.submitEscapeVote(socket.id, leave)));
-  socket.on('item:play', ({ itemId, targetId }) =>
-    guard(socket.id, () => manager.submitItem(socket.id, itemId, targetId)),
-  );
+  socket.on('escape:vote', ({ leave }) => guard(socket.id, () => manager.submitEscape(socket.id, leave)));
   socket.on('chat:say', ({ text }) => guard(socket.id, () => manager.chat(socket.id, text)));
 
   socket.on('disconnect', () => manager.handleDisconnect(socket.id));

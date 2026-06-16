@@ -73,19 +73,23 @@ export function App() {
     const r = sfx.current;
     let sawDeath = false;
     let sawEscape = false;
+    let sawSnake = false;
     const newest = view.log[view.log.length - 1];
     for (const e of view.log) {
       if (e.id <= r.logId) continue;
       if (e.kind === 'death') sawDeath = true;
       if (e.kind === 'escape') sawEscape = true;
+      if (e.kind === 'snake') sawSnake = true;
     }
     if (newest) r.logId = newest.id;
     if (sawDeath) playSound('death');
     if (sawEscape) playSound('escape');
+    if (sawSnake) playSound('snake');
 
-    if (view.weather && view.weather !== r.weather) {
-      if (view.weather === 'storm') playSound('storm');
-      r.weather = view.weather;
+    const w = view.hurricaneRevealed ? 'storm' : `p${view.currentPrecip}`;
+    if (w !== r.weather) {
+      if (view.hurricaneRevealed) playSound('storm');
+      r.weather = w;
     }
     if (view.phase !== r.phase) {
       if (view.phase === 'vote') playSound('vote');

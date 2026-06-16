@@ -62,12 +62,31 @@ export function Lobby({ view, onLeave }: Props) {
             type="checkbox"
             checked={view.config.soleSurvivor}
             disabled={!isHost}
-            onChange={(e) => api.setConfig(e.target.checked)}
+            onChange={(e) => api.setConfig({ soleSurvivor: e.target.checked })}
           />
           <span>
             <strong>ソロサバイバル</strong>：単独で脱出した者だけが勝者（最も殺伐）
           </span>
         </label>
+
+        <div className="config-row">
+          <label>
+            CPU難易度
+            <select disabled={!isHost} value={view.config.difficulty} onChange={(e) => api.setConfig({ difficulty: e.target.value as never })}>
+              <option value="easy">やさしい</option>
+              <option value="normal">ふつう</option>
+              <option value="hard">むずかしい</option>
+            </select>
+          </label>
+          <label>
+            演出スピード
+            <select disabled={!isHost} value={view.config.speed} onChange={(e) => api.setConfig({ speed: e.target.value as never })}>
+              <option value="slow">ゆっくり</option>
+              <option value="normal">ふつう</option>
+              <option value="fast">速い</option>
+            </select>
+          </label>
+        </div>
 
         <div className="lobby-actions">
           {isHost ? (
