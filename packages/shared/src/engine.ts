@@ -1,92 +1,89 @@
 import {
+  BAG,
   DEFAULT_CONFIG,
-  FISH_RANGE,
-  ITEM_DRAW_PROB,
-  ITEM_WEIGHTS,
-  RAIN_PROB,
-  SEARCH_RANGE,
-  WATER_YIELD,
-  WOOD_PER_ACTION,
-  raftCapacity,
+  MAX_SEATS,
+  PERMANENT_KINDS,
+  RAFT_LOOP,
+  RESOURCE_CAP,
+  buildWeatherDeck,
+  buildWreckageDeck,
+  cardsDealtPerPlayer,
+  drawBall,
+  initialSupplies,
+  isSnake,
 } from './content.js';
 import { Rng } from './rng.js';
-import {
-  PERMANENT_ITEMS,
-  type ActionType,
-  type BotPersona,
-  type GameConfig,
-  type GameState,
-  type ItemKind,
-  type Player,
-  type Phase,
-  type WeatherType,
+import type {
+  ActionType,
+  BotPersona,
+  Card,
+  CardKind,
+  GameConfig,
+  GameState,
+  Player,
+  VoteReason,
 } from './types.js';
-
-type NewPlayerInput = Pick<Player, 'id' | 'name' | 'isBot'> & { botPersona?: BotPersona };
-
-// ===== 小さなヘルパー =====
 
 const clone = <T>(v: T): T => structuredClone(v);
 
-export function alivePlayers(state: GameState): Player[] {
-  return state.players.filter((p) => p.alive && !p.escaped);
+// ===== 基本ヘルパー =====
+export function alivePlayers(s: GameState): Player[] {
+  return s.players.filter((p) => p.alive && !p.escaped);
+}
+export function aliveCount(s: GameState): number {
+  return alivePlayers(s).length;
+}
+function find(s: GameState, id: string): Player | undefined {
+  return s.players.find((p) => p.id === id);
+}
+function hasCard(p: Player, kind: CardKind): boolean {
+  return p.hand.some((c) => c.kind === kind);
+}
+export function hasPermanent(p: Player, kind: CardKind): boolean {
+  return hasCard(p, kind);
+}
+function clampSupply(n: number): number {
+  return Math.max(0, Math.min(RESOURCE_CAP, n));
+}
+function pushLog(s: GameState, text: string, kind?: GameState['log'][number]['kind'], playerId?: string): void {
+  s.log.push({ id: s.logSeq++, round: s.round, text, kind, playerId });
+  if (s.log.length > 300) s.log.splice(0, s.log.length - 300);
+}
+export function currentActorId(s: GameState): string | null {
+  if (s.phase !== 'action') return null;
+  const p = s.players[s.currentActorIndex];
+  return p && p.alive && !p.escaped ? p.id : null;
+}
+export function canEscapeAll(s: GameState): boolean {
+  const need = aliveCount(s);
+  return need > 0 && s.raftSeats >= need && s.food >= need && s.water >= need;
 }
 
-export function aliveCount(state: GameState): number {
-  return alivePlayers(state).length;
+/** index から右回り（増加方向）で最初の生存者 index */
+function nextAliveIndex(s: GameState, from: number): number {
+  const n = s.players.length;
+  for (let i = 0; i < n; i++) {
+    const idx = (from + i) % n;
+    const p = s.players[idx];
+    if (p.alive && !p.escaped) return idx;
+  }
+  return from % n;
 }
 
-export function getCapacity(state: GameState): number {
-  return raftCapacity(state.wood, state.config);
-}
-
-export function isFinalDay(state: GameState): boolean {
-  return state.stormIn <= 0;
-}
-
-function findPlayer(state: GameState, id: string): Player | undefined {
-  return state.players.find((p) => p.id === id);
-}
-
-function pushLog(
-  state: GameState,
-  text: string,
-  kind?: 'info' | 'good' | 'bad' | 'death' | 'escape',
-  playerId?: string,
-): void {
-  state.log.push({ id: state.logSeq++, day: state.day, text, kind, playerId });
-  // ログは直近 200 件に制限
-  if (state.log.length > 200) state.log.splice(0, state.log.length - 200);
+function addWood(s: GameState, n: number): void {
+  let prog = s.raftProgress + n;
+  while (prog >= RAFT_LOOP && s.raftSeats < MAX_SEATS) {
+    prog -= RAFT_LOOP;
+    s.raftSeats += 1;
+    pushLog(s, `筏の座席が1つ完成！（座席 ${s.raftSeats}）`, 'good');
+  }
+  s.raftProgress = s.raftSeats >= MAX_SEATS ? 0 : prog;
 }
 
 // ===== ロビー =====
+type NewPlayer = Pick<Player, 'id' | 'name' | 'isBot'> & { botPersona?: BotPersona };
 
-export function createGame(
-  initialPlayers: NewPlayerInput[],
-  config: Partial<GameConfig> = {},
-): GameState {
-  const cfg: GameConfig = { ...DEFAULT_CONFIG, ...config };
-  return {
-    phase: 'lobby',
-    day: 0,
-    players: initialPlayers.map((p) => newPlayer(p)),
-    food: 0,
-    water: 0,
-    wood: 0,
-    stormIn: cfg.initialStormIn,
-    weather: null,
-    firstPlayerIndex: 0,
-    shortage: 0,
-    rngState: cfg.seed,
-    itemSeq: 0,
-    log: [],
-    logSeq: 0,
-    winners: [],
-    config: cfg,
-  };
-}
-
-function newPlayer(p: NewPlayerInput): Player {
+function newPlayer(p: NewPlayer): Player {
   return {
     id: p.id,
     name: p.name,
@@ -95,555 +92,659 @@ function newPlayer(p: NewPlayerInput): Player {
     alive: true,
     escaped: false,
     sick: false,
-    hand: { food: 0, water: 0 },
-    items: [],
+    resting: false,
+    hand: [],
+    acted: false,
     botPersona: p.botPersona,
   };
 }
 
-function hasItem(p: Player, kind: ItemKind): boolean {
-  return p.items.some((it) => it.kind === kind);
+export function createGame(initial: NewPlayer[], config: Partial<GameConfig> = {}): GameState {
+  const cfg: GameConfig = { ...DEFAULT_CONFIG, ...config };
+  return {
+    phase: 'lobby',
+    round: 0,
+    players: initial.map(newPlayer),
+    food: 0,
+    water: 0,
+    raftSeats: 0,
+    raftProgress: 0,
+    weatherDeck: [],
+    currentPrecip: 0,
+    hurricaneRevealed: false,
+    deck: [],
+    firstPlayerIndex: 0,
+    currentActorIndex: 0,
+    pendingEliminations: 0,
+    rngState: cfg.seed,
+    cardSeq: 0,
+    log: [],
+    logSeq: 0,
+    winners: [],
+    config: cfg,
+  };
 }
 
-function drawItemKind(rng: Rng): ItemKind {
-  const entries = Object.entries(ITEM_WEIGHTS) as [ItemKind, number][];
-  const total = entries.reduce((sum, [, w]) => sum + w, 0);
-  let r = rng.next() * total;
-  for (const [kind, w] of entries) {
-    r -= w;
-    if (r < 0) return kind;
-  }
-  return entries[entries.length - 1][0];
+export function addPlayer(s: GameState, p: NewPlayer): GameState {
+  if (s.phase !== 'lobby') return s;
+  const d = clone(s);
+  d.players.push(newPlayer(p));
+  return d;
 }
-
-export function addPlayer(state: GameState, p: NewPlayerInput): GameState {
-  if (state.phase !== 'lobby') return state;
-  const s = clone(state);
-  s.players.push(newPlayer(p));
-  return s;
+export function removePlayer(s: GameState, id: string): GameState {
+  if (s.phase !== 'lobby') return s;
+  const d = clone(s);
+  d.players = d.players.filter((p) => p.id !== id);
+  if (d.firstPlayerIndex >= d.players.length) d.firstPlayerIndex = 0;
+  return d;
 }
-
-/** ロビー中のみ、設定（ソロサバイバル等）を変更する。 */
-export function setConfig(state: GameState, partial: Partial<GameConfig>): GameState {
-  if (state.phase !== 'lobby') return state;
-  const s = clone(state);
-  s.config = { ...s.config, ...partial };
-  return s;
-}
-
-export function removePlayer(state: GameState, id: string): GameState {
-  if (state.phase !== 'lobby') return state;
-  const s = clone(state);
-  s.players = s.players.filter((p) => p.id !== id);
-  if (s.firstPlayerIndex >= s.players.length) s.firstPlayerIndex = 0;
-  return s;
-}
-
-export function setConnected(state: GameState, id: string, connected: boolean): GameState {
-  const s = clone(state);
-  const p = findPlayer(s, id);
+export function setConnected(s: GameState, id: string, connected: boolean): GameState {
+  const d = clone(s);
+  const p = find(d, id);
   if (p) p.connected = connected;
-  return s;
+  return d;
+}
+export function setConfig(s: GameState, partial: Partial<GameConfig>): GameState {
+  if (s.phase !== 'lobby') return s;
+  const d = clone(s);
+  d.config = { ...d.config, ...partial };
+  return d;
 }
 
-// ===== 開始 / 1日の開始 =====
-
-export function startGame(state: GameState): GameState {
-  if (state.phase !== 'lobby') return state;
-  const s = clone(state);
-  pushLog(s, `${s.players.length}人の生存者が無人島に漂着した。嵐が来るまで${s.config.initialStormIn}日。`, 'info');
-  return beginDay(s);
-}
-
-function beginDay(state: GameState): GameState {
-  const s = state; // beginDay は常に clone 済みの draft に対して呼ぶ
-  s.day += 1;
-  // stormIn は day から再計算（ドリフト防止）
-  s.stormIn = s.config.initialStormIn - (s.day - 1);
-  s.shortage = 0;
-
-  // 病人は回復し、その日の選択をリセット
-  for (const p of s.players) {
-    p.pendingAction = undefined;
-    p.contribute = undefined;
-    p.vote = undefined;
-    p.escapeVote = undefined;
-    p.votesReceived = undefined;
-    p.voteImmune = false;
-    if (p.alive) p.sick = false;
+// ===== 開始 =====
+export function startGame(s: GameState): GameState {
+  if (s.phase !== 'lobby') return s;
+  const d = clone(s);
+  const n = d.players.length;
+  const rng = new Rng(d.rngState);
+  const sup = initialSupplies(n);
+  d.food = sup.food;
+  d.water = sup.water;
+  d.weatherDeck = buildWeatherDeck(rng);
+  const { deck, nextSeq } = buildWreckageDeck(rng, d.cardSeq);
+  d.deck = deck;
+  d.cardSeq = nextSeq;
+  const per = cardsDealtPerPlayer(n);
+  for (const p of d.players) {
+    for (let i = 0; i < per && d.deck.length; i++) p.hand.push(d.deck.shift() as Card);
   }
+  d.firstPlayerIndex = 0;
+  d.rngState = rng.state;
+  pushLog(d, `${n}人が無人島に漂着。水${d.water}・食料${d.food}で始まる。各自カード${per}枚。`, 'info');
+  return beginRound(d);
+}
 
-  const rng = new Rng(s.rngState);
-  let weather: WeatherType;
-  if (s.stormIn <= 0) weather = 'storm';
-  else weather = rng.chance(RAIN_PROB) ? 'rain' : 'sunny';
-  s.rngState = rng.state;
-  s.weather = weather;
-
-  const label = weather === 'storm' ? '嵐' : weather === 'rain' ? '雨' : '晴れ';
-  if (weather === 'storm') {
-    pushLog(s, `${s.day}日目。ついに嵐が来た。今日中に脱出できなければ全滅だ。`, 'bad');
+function beginRound(d: GameState): GameState {
+  d.round += 1;
+  // 親の移動（初回スキップ）
+  if (d.round > 1) {
+    if (d.nextParentId) {
+      const idx = d.players.findIndex((p) => p.id === d.nextParentId);
+      d.firstPlayerIndex = idx >= 0 ? nextAliveIndex(d, idx) : nextAliveIndex(d, d.firstPlayerIndex + 1);
+      d.nextParentId = null;
+    } else {
+      d.firstPlayerIndex = nextAliveIndex(d, d.firstPlayerIndex + 1);
+    }
   } else {
-    pushLog(s, `${s.day}日目（天候: ${label}）。嵐まであと${s.stormIn}日。`, 'info');
+    d.firstPlayerIndex = nextAliveIndex(d, d.firstPlayerIndex);
   }
+  // 病気→休みへ繰り越し
+  for (const p of d.players) {
+    if (p.sick) {
+      p.resting = true;
+      p.sick = false;
+    }
+    p.acted = false;
+    p.vote = undefined;
+    p.escapeChoice = undefined;
+  }
+  d.fruitUsed = false;
+  d.lastWoodGain = undefined;
+  // 天候公開
+  const card = d.weatherDeck.shift();
+  if (card) {
+    d.currentPrecip = card.precip;
+    if (card.hurricane) {
+      d.hurricaneRevealed = true;
+      pushLog(d, `${d.round}ラウンド：🌀ハリケーン到来！今ラウンド終了時に必ず脱出。`, 'bad');
+    } else {
+      pushLog(d, `${d.round}ラウンド：天候の降水量 ${d.currentPrecip}（水汲み量）。`, 'info');
+    }
+  }
+  d.phase = 'action';
+  d.currentActorIndex = d.firstPlayerIndex;
+  return prepareActor(d);
+}
 
-  s.phase = 'action';
-  return s;
+/** 休み/行動済みをスキップし、全員行動済みなら生存フェイズへ */
+function prepareActor(d: GameState): GameState {
+  const n = d.players.length;
+  for (let i = 0; i < n + 1; i++) {
+    const p = d.players[d.currentActorIndex];
+    if (!p || !p.alive || p.escaped || p.acted) {
+      // 次へ
+    } else if (p.resting) {
+      p.acted = true;
+      pushLog(d, `${p.name} はヘビの毒で動けない（休み）。`, 'bad', p.id);
+    } else {
+      return d; // この人の手番
+    }
+    // 全員行動済み？
+    if (alivePlayers(d).every((x) => x.acted)) return enterSurvival(d);
+    d.currentActorIndex = nextAliveIndex(d, d.currentActorIndex + 1);
+  }
+  return enterSurvival(d);
 }
 
 // ===== 行動フェイズ =====
+export function takeAction(s: GameState, playerId: string, action: ActionType, woodPush = 0): GameState {
+  if (s.phase !== 'action') return s;
+  if (currentActorId(s) !== playerId) return s;
+  const d = clone(s);
+  const p = find(d, playerId)!;
+  const rng = new Rng(d.rngState);
+  d.lastWoodGain = undefined;
 
-export function chooseAction(state: GameState, playerId: string, action: ActionType): GameState {
-  if (state.phase !== 'action') return state;
-  const s = clone(state);
-  const p = findPlayer(s, playerId);
-  if (!p || !p.alive || p.escaped) return state;
-  // 病人は行動できない（自動で待機）
-  if (p.sick) {
-    p.pendingAction = 'fish';
-    return s;
-  }
-  p.pendingAction = action;
-  return s;
-}
-
-export function resolveActions(state: GameState): GameState {
-  if (state.phase !== 'action') return state;
-  const s = clone(state);
-  const rng = new Rng(s.rngState);
-
-  for (const p of alivePlayers(s)) {
-    const action: ActionType = p.sick ? 'fish' : p.pendingAction ?? 'fish';
-    if (p.sick) {
-      pushLog(s, `${p.name} はヘビの毒で動けなかった。`, 'bad', p.id);
-      continue;
+  switch (action) {
+    case 'fish': {
+      const ball = drawBall(rng);
+      if (isSnake(ball)) {
+        d.lastDraw = { playerId, balls: [ball], action };
+        pushLog(d, `${p.name} は釣り：ヘビが出て魚は獲れなかった。`, 'snake', playerId);
+      } else {
+        const gain = ball.fish * (hasPermanent(p, 'fishing_rod') ? 2 : 1);
+        d.food = clampSupply(d.food + gain);
+        d.lastDraw = { playerId, balls: [ball], action };
+        pushLog(d, `${p.name} は釣り：魚 ${ball.fish}${hasPermanent(p, 'fishing_rod') ? '×2' : ''} で食料 +${gain}。`, 'good', playerId);
+      }
+      break;
     }
-    switch (action) {
-      case 'fish': {
-        const n = rng.int(FISH_RANGE[0], FISH_RANGE[1]) + (hasItem(p, 'rod') ? 1 : 0);
-        s.food += n;
-        pushLog(s, `${p.name} は魚を釣った（食料 +${n}）。`, 'good', p.id);
-        break;
+    case 'water': {
+      const mult = hasPermanent(p, 'canteen') ? 2 : 1;
+      const gain = d.currentPrecip * mult;
+      if (gain <= 0) {
+        pushLog(d, `${p.name} は水汲み：雨がなく汲めなかった。`, 'info', playerId);
+      } else {
+        d.water = clampSupply(d.water + gain);
+        pushLog(d, `${p.name} は水汲み：水 +${gain}（降水量${d.currentPrecip}${mult > 1 ? '×2' : ''}）。`, 'good', playerId);
       }
-      case 'water': {
-        const [lo, hi] = WATER_YIELD[s.weather ?? 'sunny'];
-        const n = rng.int(lo, hi) + (hasItem(p, 'filter') ? 1 : 0);
-        s.water += n;
-        pushLog(s, `${p.name} は水を確保した（水 +${n}）。`, 'good', p.id);
-        break;
-      }
-      case 'wood': {
-        const n = WOOD_PER_ACTION + (hasItem(p, 'axe') ? 1 : 0);
-        s.wood += n;
-        pushLog(s, `${p.name} は木材を集めた（木材 +${n}）。`, 'good', p.id);
-        break;
-      }
-      case 'search': {
-        if (rng.chance(ITEM_DRAW_PROB)) {
-          const kind = drawItemKind(rng);
-          p.items.push({ id: `i${s.itemSeq++}`, kind });
-          pushLog(s, `${p.name} は難破船で何か（道具）を見つけた。`, 'info', p.id);
+      break;
+    }
+    case 'wood': {
+      const base = 1 + (hasPermanent(p, 'axe') ? 1 : 0);
+      addWood(d, base);
+      let gained = base;
+      const push = Math.max(0, Math.min(5, Math.floor(woodPush)));
+      if (push > 0) {
+        const balls = Array.from({ length: push }, () => drawBall(rng));
+        d.lastDraw = { playerId, balls, action };
+        if (balls.some(isSnake)) {
+          p.sick = true;
+          pushLog(d, `${p.name} は木集めで${push}個引き、🐍ヘビに噛まれた！追加の木はなし（病気）。`, 'snake', playerId);
         } else {
-          const kind: 'food' | 'water' = rng.chance(0.5) ? 'food' : 'water';
-          const n = rng.int(SEARCH_RANGE[0], SEARCH_RANGE[1]);
-          p.hand[kind] += n;
-          pushLog(s, `${p.name} は難破船を漁った。（隠し財産を得た）`, 'info', p.id);
+          addWood(d, push);
+          gained += push;
+          pushLog(d, `${p.name} は木集めで${push}個引き、木 +${push}（無事）。`, 'good', playerId);
         }
-        break;
+      } else {
+        d.lastDraw = { playerId, balls: [], action };
+        pushLog(d, `${p.name} は木を集めた（+${base}）。`, 'good', playerId);
       }
+      d.lastWoodGain = { playerId, amount: gained };
+      break;
+    }
+    case 'search': {
+      const card = d.deck.shift();
+      if (card) {
+        p.hand.push(card);
+        pushLog(d, `${p.name} は難破船を漁り、カードを1枚得た。`, 'card', playerId);
+      } else {
+        pushLog(d, `${p.name} は難破船を漁ったが山札は尽きていた。`, 'info', playerId);
+      }
+      break;
     }
   }
 
-  s.rngState = rng.state;
-
-  // 隠し財産を持たない生存者は供出ステップが不要 → 自動で 0 供出
-  for (const p of alivePlayers(s)) {
-    if (p.hand.food + p.hand.water <= 0) p.contribute = { food: 0, water: 0 };
-  }
-
-  s.phase = 'survival';
-  return s;
+  p.acted = true;
+  d.rngState = rng.state;
+  d.currentActorIndex = nextAliveIndex(d, d.currentActorIndex + 1);
+  return prepareActor(d);
 }
 
-// ===== 生存フェイズ（供出 → 判定） =====
-
-export function setContribute(
-  state: GameState,
-  playerId: string,
-  contribute: { food: number; water: number },
-): GameState {
-  if (state.phase !== 'survival') return state;
-  const s = clone(state);
-  const p = findPlayer(s, playerId);
-  if (!p || !p.alive || p.escaped) return state;
-  const food = Math.max(0, Math.min(p.hand.food, Math.floor(contribute.food)));
-  const water = Math.max(0, Math.min(p.hand.water, Math.floor(contribute.water)));
-  p.contribute = { food, water };
-  return s;
+// ===== 生存フェイズ =====
+function enterSurvival(d: GameState): GameState {
+  // 休み解除（このラウンドの投票には参加可）
+  for (const p of d.players) p.resting = false;
+  // 生存ウィンドウ：カード補填のため acted をリセット（パスで true）
+  for (const p of alivePlayers(d)) p.acted = false;
+  d.phase = 'survival';
+  pushLog(d, `生存チェック：生存者${aliveCount(d)}人が水1・食料1を消費。`, 'info');
+  return d;
 }
 
-export function resolveSurvival(state: GameState): GameState {
-  if (state.phase !== 'survival') return state;
-  let s = clone(state);
-
-  // 供出を共有プールへ移動
-  for (const p of alivePlayers(s)) {
-    const c = p.contribute ?? { food: 0, water: 0 };
-    const food = Math.min(p.hand.food, c.food);
-    const water = Math.min(p.hand.water, c.water);
-    p.hand.food -= food;
-    p.hand.water -= water;
-    s.food += food;
-    s.water += water;
-    if (food + water > 0) {
-      pushLog(s, `${p.name} は備蓄を供出した（食料${food}・水${water}）。`, 'good', p.id);
-    }
-  }
-
-  const need = aliveCount(s);
-  const supportable = Math.min(s.food, s.water);
-  const shortage = Math.max(0, need - supportable);
-
-  pushLog(s, `生存判定: 生存者${need}人に水${s.water}・食料${s.food}。`, 'info');
-
-  if (shortage <= 0) {
-    // 全員生存。消費して脱出フェイズへ
-    s.food -= need;
-    s.water -= need;
-    pushLog(s, `全員が今日を生き延びた。`, 'good');
-    return enterEscape(s);
-  }
-
-  if (shortage >= need) {
-    // 誰も支えられない → 全滅
-    for (const p of alivePlayers(s)) p.alive = false;
-    pushLog(s, `水も食料も尽き、生存者は全員力尽きた……`, 'death');
-    s.phase = 'gameover';
-    return s;
-  }
-
-  // 不足分だけ投票で追放
-  s.shortage = shortage;
-  pushLog(s, `水・食料が${shortage}人分足りない。${shortage}人を追放するしかない。`, 'bad');
-  s.phase = 'vote';
-  return s;
+/** 生存ウィンドウで「これ以上カードを使わない」宣言 */
+export function passSurvival(s: GameState, playerId: string): GameState {
+  if (s.phase !== 'survival') return s;
+  const d = clone(s);
+  const p = find(d, playerId);
+  if (p && p.alive && !p.escaped) p.acted = true;
+  return d;
 }
 
-// ===== 投票フェイズ =====
+export function isSurvivalReady(s: GameState): boolean {
+  return s.phase === 'survival' && alivePlayers(s).every((p) => p.acted);
+}
 
-export function castVote(state: GameState, playerId: string, targetId: string | null): GameState {
-  if (state.phase !== 'vote') return state;
-  const s = clone(state);
-  const voter = findPlayer(s, playerId);
-  if (!voter || !voter.alive || voter.escaped) return state;
-  // 対象は「生存中・自分以外」のみ有効。無効なら棄権扱い
+export function resolveSurvival(s: GameState): GameState {
+  if (s.phase !== 'survival') return s;
+  return consumeWater(clone(s));
+}
+
+function consumeWater(d: GameState): GameState {
+  if (d.fruitUsed) return afterFruit(d);
+  const need = aliveCount(d);
+  if (d.water >= need) {
+    d.water -= need;
+    return consumeFood(d);
+  }
+  // 不足
+  if (d.water === 0) {
+    // 投票なし：全員渇きで死亡（カードは生存ウィンドウで使えた）
+    for (const p of alivePlayers(d)) p.alive = false;
+    pushLog(d, `水が尽き、全員が渇きで倒れた……`, 'death');
+    d.phase = 'gameover';
+    return d;
+  }
+  const deficit = need - d.water;
+  d.water = 0;
+  d.pendingEliminations = deficit;
+  d.voteReason = 'water';
+  pushLog(d, `水が${deficit}人分足りない。${deficit}人を投票で決める。`, 'bad');
+  return startVote(d);
+}
+
+function consumeFood(d: GameState): GameState {
+  if (d.fruitUsed) return afterFruit(d);
+  const need = aliveCount(d);
+  if (d.food >= need) {
+    d.food -= need;
+    return endRoundCheck(d);
+  }
+  if (d.food === 0) {
+    for (const p of alivePlayers(d)) p.alive = false;
+    pushLog(d, `食料が尽き、全員が飢えで倒れた……`, 'death');
+    d.phase = 'gameover';
+    return d;
+  }
+  const deficit = need - d.food;
+  d.food = 0;
+  d.pendingEliminations = deficit;
+  d.voteReason = 'food';
+  pushLog(d, `食料が${deficit}人分足りない。${deficit}人を投票で決める。`, 'bad');
+  return startVote(d);
+}
+
+function afterFruit(d: GameState): GameState {
+  // フルーツバスケット：誰も死なず、消費なし（両カウンタは0のまま）
+  pushLog(d, `フルーツバスケットにより、このラウンドは誰も飢え死にしない。`, 'good');
+  return endRoundCheck(d);
+}
+
+// ===== 投票 =====
+function eligibleVoters(d: GameState): Player[] {
+  return alivePlayers(d).filter((p) => !p.sick);
+}
+function startVote(d: GameState): GameState {
+  for (const p of d.players) {
+    p.vote = undefined;
+    (p as { votesReceived?: number }).votesReceived = undefined;
+  }
+  d.phase = 'vote';
+  return d;
+}
+export function castVote(s: GameState, playerId: string, targetId: string | null): GameState {
+  if (s.phase !== 'vote') return s;
+  const d = clone(s);
+  const voter = find(d, playerId);
+  if (!voter || !voter.alive || voter.escaped || voter.sick) return s;
   let valid: string | null = null;
   if (targetId) {
-    const t = findPlayer(s, targetId);
+    const t = find(d, targetId);
     if (t && t.alive && !t.escaped && t.id !== playerId) valid = targetId;
   }
   voter.vote = valid;
-  return s;
+  return d;
+}
+export function isVoteReady(s: GameState): boolean {
+  return s.phase === 'vote' && eligibleVoters(s).every((p) => p.vote !== undefined);
 }
 
-export function resolveVotes(state: GameState): GameState {
-  if (state.phase !== 'vote') return state;
-  let s = clone(state);
-  const rng = new Rng(s.rngState);
-
+export function resolveVote(s: GameState): GameState {
+  if (s.phase !== 'vote') return s;
+  const d = clone(s);
   // 集計
   const tally = new Map<string, number>();
-  for (const p of alivePlayers(s)) {
-    if (p.vote) tally.set(p.vote, (tally.get(p.vote) ?? 0) + 1);
-  }
-  for (const p of alivePlayers(s)) p.votesReceived = tally.get(p.id) ?? 0;
+  for (const v of eligibleVoters(d)) if (v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + 1);
+  for (const p of d.players) (p as { votesReceived?: number }).votesReceived = tally.get(p.id) ?? 0;
 
-  // 投票開始後に拳銃などで人数が変わっている可能性があるため、不足数を再計算
-  const need0 = aliveCount(s);
-  const supportable = Math.min(s.food, s.water);
-  const shortage = Math.max(0, Math.min(s.shortage, need0 - supportable));
+  const candidates = alivePlayers(d);
+  let max = -1;
+  for (const p of candidates) max = Math.max(max, tally.get(p.id) ?? 0);
+  let topped = candidates.filter((p) => (tally.get(p.id) ?? 0) === max && max > 0);
 
-  if (shortage <= 0) {
-    pushLog(s, `状況が変わり、犠牲は不要になった。`, 'good');
+  let victim: Player | undefined;
+  if (topped.length === 1) {
+    victim = topped[0];
   } else {
-    // 票数の多い順に追放。睡眠薬による免疫者は可能な限り後回し。同票は乱数で裁定。
-    const shuffled = rng.shuffle(alivePlayers(s));
-    shuffled.sort((a, b) => (b.votesReceived ?? 0) - (a.votesReceived ?? 0));
-    const order = [
-      ...shuffled.filter((p) => !p.voteImmune),
-      ...shuffled.filter((p) => p.voteImmune),
-    ];
-
-    const toEliminate = order.slice(0, shortage);
-    for (const victim of toEliminate) {
-      victim.alive = false;
-      // 追放者の隠し財産は共有プールへ（生存者が分け合う）。道具は失われる。
-      s.food += victim.hand.food;
-      s.water += victim.hand.water;
-      victim.hand = { food: 0, water: 0 };
-      victim.items = [];
-      const note = victim.voteImmune ? '（睡眠薬も及ばず）' : '';
-      pushLog(
-        s,
-        `${victim.name} は${victim.votesReceived}票を集め、海へ突き落とされた${note}……`,
-        'death',
-        victim.id,
-      );
+    // 同票/無投票 → 親が裁定
+    const parent = d.players[d.firstPlayerIndex];
+    const pool = topped.length > 0 ? topped : candidates.filter((p) => p.id !== parent?.id);
+    // 親の票がプール内ならそれ、無ければ「手札が最少」を裁定（決定的）
+    if (parent?.vote && pool.some((p) => p.id === parent.vote)) {
+      victim = pool.find((p) => p.id === parent.vote);
+    } else {
+      victim = [...pool].sort((a, b) => a.hand.length - b.hand.length || d.players.indexOf(a) - d.players.indexOf(b))[0];
     }
   }
+  if (!victim) {
+    // 候補なし（全員親など）→ 追放不能。安全側で打ち切り
+    d.pendingEliminations = 0;
+    return afterVoteBatch(d);
+  }
 
-  s.rngState = rng.state;
-  s.shortage = 0;
+  // 該当資源カードで自己救済（自動）
+  const reason = d.voteReason;
+  const saveKind = reason === 'water' ? resourceWaterCard(victim) : resourceFoodCard(victim);
+  if (saveKind) {
+    applyResourceCard(d, victim, saveKind);
+    pushLog(d, `${victim.name} はカードを切り、追放を免れた。`, 'card', victim.id);
+    d.pendingEliminations -= 1;
+  } else {
+    eliminate(d, victim, '追放');
+    d.pendingEliminations -= 1;
+  }
 
-  // 残った生存者で消費
-  const need = aliveCount(s);
-  s.food = Math.max(0, s.food - need);
-  s.water = Math.max(0, s.water - need);
-  pushLog(s, `残った${need}人が水と食料を分け合った。`, 'info');
-
-  return enterEscape(s);
+  if (aliveCount(d) <= 0) {
+    d.phase = 'gameover';
+    pushLog(d, `生存者がいなくなった……全滅。`, 'death');
+    return d;
+  }
+  if (d.pendingEliminations > 0) return startVote(d);
+  return afterVoteBatch(d);
 }
 
-// ===== 特殊アイテム（割り込みプレイ） =====
+function afterVoteBatch(d: GameState): GameState {
+  const reason = d.voteReason;
+  d.voteReason = undefined;
+  if (reason === 'water') return consumeFood(d);
+  if (reason === 'food') return endRoundCheck(d);
+  if (reason === 'hurricane') return resolveHurricaneEscape(d);
+  return endRoundCheck(d);
+}
 
-/**
- * 手札の特殊アイテムを使用する。行動・生存・投票・脱出のいずれの能動フェイズでも割り込み可能。
- * 永続アイテム（斧・釣り竿・浄水器）は所持で自動発動するため手動プレイ不可。
- */
-export function playItem(
-  state: GameState,
-  playerId: string,
-  itemId: string,
-  targetId?: string | null,
-): GameState {
-  if (!isAwaitingInput(state.phase)) return state;
-  const s = clone(state);
-  const p = findPlayer(s, playerId);
-  if (!p || !p.alive || p.escaped) return state;
-  const item = p.items.find((it) => it.id === itemId);
-  if (!item || PERMANENT_ITEMS.has(item.kind)) return state;
+function resourceWaterCard(p: Player): CardKind | undefined {
+  for (const k of ['water_bottle', 'dirty_water'] as CardKind[]) if (hasCard(p, k)) return k;
+  return undefined;
+}
+function resourceFoodCard(p: Player): CardKind | undefined {
+  for (const k of ['sardine_can', 'sandwich', 'rotten_fish'] as CardKind[]) if (hasCard(p, k)) return k;
+  return undefined;
+}
 
-  let used = false;
-  switch (item.kind) {
-    case 'antidote': {
-      if (!p.sick) return state; // 病気でなければ無駄遣いさせない
+function removeOneCard(p: Player, kind: CardKind): void {
+  const i = p.hand.findIndex((c) => c.kind === kind);
+  if (i >= 0) p.hand.splice(i, 1);
+}
+
+/** 資源カードをプールへ反映（自己救済・生存ウィンドウ共通） */
+function applyResourceCard(d: GameState, p: Player, kind: CardKind): void {
+  switch (kind) {
+    case 'water_bottle':
+      d.water = clampSupply(d.water + 1);
+      break;
+    case 'dirty_water':
+      d.water = clampSupply(d.water + 1);
+      p.sick = true;
+      break;
+    case 'sandwich':
+      d.food = clampSupply(d.food + 1);
+      break;
+    case 'sardine_can':
+      d.food = clampSupply(d.food + 3);
+      break;
+    case 'rotten_fish':
+      d.food = clampSupply(d.food + 1);
+      p.sick = true;
+      break;
+    case 'fruit_basket':
+      d.food = 0;
+      d.water = 0;
+      d.fruitUsed = true;
+      break;
+    default:
+      return;
+  }
+  removeOneCard(p, kind);
+}
+
+/** 脱落処理：手札を両隣へ交互配布（銃も含め場に残す） */
+function eliminate(d: GameState, victim: Player, cause: string): void {
+  victim.alive = false;
+  const v = (d.players.find((p) => p.id === victim.id) as { votesReceived?: number }).votesReceived ?? 0;
+  pushLog(d, `${victim.name} は${cause}され、島から消えた……（${v}票）`, 'death', victim.id);
+  // 両隣（生存）へ交互配布
+  const idx = d.players.indexOf(victim);
+  const left = findNeighbor(d, idx, -1);
+  const right = findNeighbor(d, idx, +1);
+  const targets = [right, left].filter(Boolean) as Player[];
+  const hand = victim.hand;
+  victim.hand = [];
+  if (targets.length === 0) return;
+  hand.forEach((c, i) => targets[i % targets.length].hand.push(c));
+}
+function findNeighbor(d: GameState, idx: number, dir: number): Player | undefined {
+  const n = d.players.length;
+  for (let i = 1; i <= n; i++) {
+    const p = d.players[(idx + dir * i + n * i) % n];
+    if (p && p.alive && !p.escaped) return p;
+  }
+  return undefined;
+}
+
+// ===== カードプレイ（手番＋生存/投票ウィンドウ） =====
+export function playCard(s: GameState, playerId: string, cardId: string, targetId?: string | null): GameState {
+  const p0 = find(s, playerId);
+  if (!p0 || !p0.alive || p0.escaped || p0.resting) return s;
+  const card = p0.hand.find((c) => c.id === cardId);
+  if (!card) return s;
+  // 病気中はカード不可（自己救済は自動処理のため除外）
+  if (p0.sick && card.kind !== 'serum') return s;
+  // 永続/無用品/弾単体は能動プレイ無効
+  if (PERMANENT_KINDS.has(card.kind) && card.kind !== 'gun') return s;
+  if (card.kind === 'junk' || card.kind === 'bullet') return s;
+
+  const d = clone(s);
+  const p = find(d, playerId)!;
+  const c = p.hand.find((x) => x.id === cardId)!;
+
+  switch (c.kind) {
+    case 'water_bottle':
+    case 'dirty_water':
+    case 'sandwich':
+    case 'sardine_can':
+    case 'rotten_fish':
+    case 'fruit_basket': {
+      if (d.phase !== 'survival' && d.phase !== 'action' && d.phase !== 'vote') return s;
+      applyResourceCard(d, p, c.kind);
+      pushLog(d, `${p.name} は ${cardName(c.kind)} を使った。`, 'card', playerId);
+      break;
+    }
+    case 'serum': {
+      if (!p.sick) return s;
       p.sick = false;
-      used = true;
-      pushLog(s, `${p.name} は解毒剤を使い、毒を抜いた。`, 'good', p.id);
-      break;
-    }
-    case 'pills': {
-      if (s.phase !== 'action' && s.phase !== 'survival' && s.phase !== 'vote') return state;
-      p.voteImmune = true;
-      used = true;
-      pushLog(s, `${p.name} は睡眠薬を飲んだ。（この追放投票では対象外）`, 'info', p.id);
-      break;
-    }
-    case 'gun': {
-      if (s.phase !== 'action' && s.phase !== 'vote') return state;
-      const t = targetId ? findPlayer(s, targetId) : undefined;
-      if (!t || !t.alive || t.escaped || t.id === p.id) return state;
-      t.alive = false;
-      // 所持品を奪う
-      p.hand.food += t.hand.food;
-      p.hand.water += t.hand.water;
-      t.hand = { food: 0, water: 0 };
-      for (const it of t.items) p.items.push(it);
-      t.items = [];
-      used = true;
-      pushLog(s, `${p.name} は ${t.name} を撃ち殺し、所持品を奪った！`, 'death', t.id);
+      if (d.lastWoodGain?.playerId === playerId && d.lastWoodGain.amount > 0) {
+        d.raftProgress -= d.lastWoodGain.amount;
+        while (d.raftProgress < 0 && d.raftSeats > 0) {
+          d.raftSeats -= 1;
+          d.raftProgress += RAFT_LOOP;
+        }
+        if (d.raftProgress < 0) d.raftProgress = 0;
+        d.lastWoodGain = undefined;
+      }
+      removeOneCard(p, 'serum');
+      pushLog(d, `${p.name} は血清で毒を治した（その回の木は失う）。`, 'card', playerId);
       break;
     }
     case 'voodoo': {
-      if (s.phase !== 'action') return state; // 蘇生は行動フェイズのみ（進行の混乱を避ける）
-      const t = targetId ? findPlayer(s, targetId) : undefined;
-      if (!t || t.alive || t.escaped) return state; // 対象は死者のみ
+      if (d.phase !== 'action') return s;
+      const t = targetId ? find(d, targetId) : undefined;
+      if (!t || t.alive || t.escaped) return s;
       t.alive = true;
       t.sick = false;
-      used = true;
-      pushLog(s, `${p.name} はブードゥー人形で ${t.name} を蘇らせた！`, 'good', t.id);
+      t.resting = false;
+      removeOneCard(p, 'voodoo');
+      pushLog(d, `${p.name} はブードゥー人形で ${t.name} を蘇らせた！`, 'card', playerId);
       break;
     }
+    case 'sleeping_pills': {
+      if (d.phase !== 'action') return s;
+      const rng = new Rng(d.rngState + 7);
+      const victims = alivePlayers(d).filter((x) => x.id !== playerId && x.hand.length > 0);
+      const chosen = rng.shuffle(victims).slice(0, 3);
+      for (const v of chosen) {
+        const card2 = rng.pick(v.hand);
+        v.hand = v.hand.filter((x) => x.id !== card2.id);
+        p.hand.push(card2);
+      }
+      d.rngState = rng.state;
+      removeOneCard(p, 'sleeping_pills');
+      pushLog(d, `${p.name} は睡眠薬で${chosen.length}人からカードを奪った。`, 'card', playerId);
+      break;
+    }
+    case 'alarm_clock': {
+      if (d.phase !== 'action') return s;
+      if (targetId && find(d, targetId)) d.nextParentId = targetId;
+      removeOneCard(p, 'alarm_clock');
+      pushLog(d, `${p.name} は目覚まし時計で次の親を指名した。`, 'card', playerId);
+      break;
+    }
+    case 'gun': {
+      // 弾が必要
+      if (!hasCard(p, 'bullet')) return s;
+      const t = targetId ? find(d, targetId) : undefined;
+      if (!t || !t.alive || t.escaped || t.id === playerId) return s;
+      removeOneCard(p, 'bullet');
+      // 撃った側が被害者の手札を得る
+      for (const card2 of t.hand) p.hand.push(card2);
+      t.hand = [];
+      t.alive = false;
+      pushLog(d, `${p.name} は ${t.name} を銃で撃った！所持品を奪った。`, 'death', t.id);
+      // 投票/生存中の射殺で人数が減る → 進行を再評価
+      if (d.phase === 'vote' && d.pendingEliminations > 0) {
+        d.pendingEliminations = Math.max(0, d.pendingEliminations - 1);
+        if (aliveCount(d) <= 0) {
+          d.phase = 'gameover';
+          return d;
+        }
+        if (d.pendingEliminations === 0) return afterVoteBatch(d);
+        return startVote(d);
+      }
+      break;
+    }
+    default:
+      return s;
   }
-
-  if (!used) return state;
-  p.items = p.items.filter((it) => it.id !== itemId);
-  return s;
+  return d;
 }
 
-// ===== 脱出フェイズ =====
+function cardName(kind: CardKind): string {
+  const map: Partial<Record<CardKind, string>> = {
+    water_bottle: '水ボトル',
+    dirty_water: '汚れた水',
+    sandwich: 'サンドイッチ',
+    sardine_can: 'イワシ缶',
+    rotten_fish: '腐った魚',
+    fruit_basket: 'フルーツバスケット',
+  };
+  return map[kind] ?? kind;
+}
 
-function enterEscape(state: GameState): GameState {
-  const s = state; // 既に clone 済みの draft 前提
-  for (const p of s.players) p.escapeVote = undefined;
-
-  const need = aliveCount(s);
+// ===== ラウンド終了・脱出 =====
+function endRoundCheck(d: GameState): GameState {
+  const need = aliveCount(d);
   if (need <= 0) {
-    s.phase = 'gameover';
-    return s;
+    d.phase = 'gameover';
+    pushLog(d, `全滅。誰も島を出られなかった。`, 'death');
+    return d;
   }
-
-  const capacity = getCapacity(s);
-  const provisionNeed = need * s.config.voyageProvisionPerSeat;
-  const provisionsOk = s.food >= provisionNeed && s.water >= provisionNeed;
-  const canEscapeAll = capacity >= need && provisionsOk;
-
-  if (isFinalDay(s)) {
-    return resolveFinalEscape(s);
+  if (d.hurricaneRevealed) {
+    const boardable = Math.min(d.raftSeats, d.food, d.water);
+    if (boardable >= need) return doEscape(d, alivePlayers(d));
+    if (boardable <= 0) {
+      for (const p of alivePlayers(d)) p.alive = false;
+      pushLog(d, `ハリケーンに飲まれ、誰も脱出できなかった……`, 'death');
+      d.phase = 'gameover';
+      return d;
+    }
+    d.pendingEliminations = need - boardable;
+    d.voteReason = 'hurricane';
+    pushLog(d, `ハリケーン：筏に乗れるのは${boardable}人。${d.pendingEliminations}人を投票で決める。`, 'bad');
+    return startVote(d);
   }
-
-  if (canEscapeAll) {
-    // 出航するか継続するかを全員で投票
-    pushLog(s, `いかだの準備が整った（席${capacity}/必要${need}、備蓄も十分）。出航するか投票しよう。`, 'good');
-    s.phase = 'escape';
-    return s;
+  // 通常ラウンド：脱出可能なら任意脱出の決断へ
+  if (canEscapeAll(d)) {
+    for (const p of d.players) p.escapeChoice = undefined;
+    d.phase = 'escape';
+    pushLog(d, `脱出の条件を満たした（座席${d.raftSeats}/必要${need}、補給も十分）。出航するか投票。`, 'good');
+    return d;
   }
-
-  // まだ脱出できない → 翌日へ
-  pushLog(
-    s,
-    `まだ脱出できない（席${capacity}/必要${need}、航海用の水食料も要確認）。翌日へ。`,
-    'info',
-  );
-  return beginDay(s);
+  return beginRound(d);
 }
 
-export function setEscapeVote(state: GameState, playerId: string, leave: boolean): GameState {
-  if (state.phase !== 'escape') return state;
-  const s = clone(state);
-  const p = findPlayer(s, playerId);
-  if (!p || !p.alive || p.escaped) return state;
-  p.escapeVote = leave;
-  return s;
+function resolveHurricaneEscape(d: GameState): GameState {
+  // 余剰を削った後、乗れる全員が脱出
+  return doEscape(d, alivePlayers(d));
 }
 
-export function resolveEscapeVote(state: GameState): GameState {
-  if (state.phase !== 'escape') return state;
-  let s = clone(state);
-  const voters = alivePlayers(s);
-  const leave = voters.filter((p) => p.escapeVote === true).length;
-  const stay = voters.length - leave;
-
-  if (leave > stay) {
-    pushLog(s, `多数決で出航が決まった。`, 'good');
-    return doEscape(s, voters);
+export function setEscapeChoice(s: GameState, playerId: string, leave: boolean): GameState {
+  if (s.phase !== 'escape') return s;
+  const d = clone(s);
+  const p = find(d, playerId);
+  if (p && p.alive && !p.escaped) p.escapeChoice = leave;
+  return d;
+}
+export function isEscapeReady(s: GameState): boolean {
+  return s.phase === 'escape' && alivePlayers(s).every((p) => p.escapeChoice !== undefined);
+}
+export function resolveEscape(s: GameState): GameState {
+  if (s.phase !== 'escape') return s;
+  const d = clone(s);
+  const voters = alivePlayers(d);
+  const leave = voters.filter((p) => p.escapeChoice === true).length;
+  if (leave > voters.length - leave) {
+    pushLog(d, `多数決で出航が決まった。`, 'good');
+    return doEscape(d, voters);
   }
-
-  pushLog(s, `出航は見送られた。島でもう1日を過ごす。`, 'info');
-  return beginDay(s);
+  pushLog(d, `出航は見送られた。島でもう1ラウンド。`, 'info');
+  return beginRound(d);
 }
 
-/** 最終日（嵐）の強制脱出。乗れる人数だけが脱出し、残りは飲まれる。 */
-function resolveFinalEscape(state: GameState): GameState {
-  const s = state;
-  const survivors = alivePlayers(s);
-  const capacity = getCapacity(s);
-  const prov = s.config.voyageProvisionPerSeat;
-  // 木材・水・食料いずれかで決まる席数
-  const seats = Math.max(
-    0,
-    Math.min(
-      capacity,
-      prov > 0 ? Math.floor(s.food / prov) : survivors.length,
-      prov > 0 ? Math.floor(s.water / prov) : survivors.length,
-    ),
-  );
-
-  const rng = new Rng(s.rngState);
-  const ordered = rng.shuffle(survivors);
-  s.rngState = rng.state;
-
-  const escapees = ordered.slice(0, seats);
-  const drowned = ordered.slice(seats);
-
-  for (const p of escapees) {
-    p.escaped = true;
-    s.winners.push(p.id);
-  }
-  for (const p of drowned) {
-    p.alive = false;
-  }
-
-  if (escapees.length > 0) {
-    pushLog(s, `嵐の中、${escapees.length}人がいかだで脱出に成功した！`, 'escape');
-  }
-  if (drowned.length > 0) {
-    pushLog(s, `${drowned.length}人は乗りきれず、嵐に飲まれた……`, 'death');
-  }
-  s.phase = 'gameover';
-  return s;
-}
-
-/** 全員（生存者）がいかだで脱出する。 */
-function doEscape(state: GameState, survivors: Player[]): GameState {
-  const s = state;
+function doEscape(d: GameState, survivors: Player[]): GameState {
   for (const p of survivors) {
     p.escaped = true;
-    s.winners.push(p.id);
+    d.winners.push(p.id);
   }
-  pushLog(s, `${survivors.length}人全員が島からの脱出に成功した！`, 'escape');
-  s.phase = 'gameover';
-  return s;
+  pushLog(d, `${survivors.length}人が筏で島を脱出した！🛶`, 'escape');
+  d.phase = 'gameover';
+  return d;
 }
 
-// ===== フェイズ進行ヘルパー（サーバが利用） =====
-
-/** プレイヤー入力を待っているフェイズか */
-export function isAwaitingInput(phase: Phase): boolean {
-  return phase === 'action' || phase === 'survival' || phase === 'vote' || phase === 'escape';
-}
-
-/** 生存中の全員が現フェイズの入力を提出済みか */
-export function isPhaseReady(state: GameState): boolean {
-  const players = alivePlayers(state);
-  switch (state.phase) {
-    case 'action':
-      return players.every((p) => p.pendingAction !== undefined);
-    case 'survival':
-      return players.every((p) => p.contribute !== undefined);
-    case 'vote':
-      return players.every((p) => p.vote !== undefined);
-    case 'escape':
-      return players.every((p) => p.escapeVote !== undefined);
-    default:
-      return false;
-  }
-}
-
-/** 現フェイズを解決し、次フェイズへ。 */
-export function resolvePhase(state: GameState): GameState {
-  switch (state.phase) {
-    case 'action':
-      return resolveActions(state);
-    case 'survival':
-      return resolveSurvival(state);
-    case 'vote':
-      return resolveVotes(state);
-    case 'escape':
-      return resolveEscapeVote(state);
-    default:
-      return state;
-  }
-}
-
-/** 締切到達時など、未提出のプレイヤーに安全なデフォルト入力を補完する。 */
-export function fillDefaults(state: GameState): GameState {
-  let s = clone(state);
-  for (const p of alivePlayers(s)) {
-    switch (s.phase) {
-      case 'action':
-        if (p.pendingAction === undefined) p.pendingAction = 'fish';
-        break;
-      case 'survival':
-        if (p.contribute === undefined) p.contribute = { food: 0, water: 0 };
-        break;
-      case 'vote':
-        if (p.vote === undefined) p.vote = null;
-        break;
-      case 'escape':
-        if (p.escapeVote === undefined) p.escapeVote = false;
-        break;
-    }
-  }
-  return s;
+// ===== サーバ進行用 =====
+export type AwaitKind = 'action' | 'survival' | 'vote' | 'escape' | null;
+export function awaiting(s: GameState): AwaitKind {
+  if (s.phase === 'action') return 'action';
+  if (s.phase === 'survival') return 'survival';
+  if (s.phase === 'vote') return 'vote';
+  if (s.phase === 'escape') return 'escape';
+  return null;
 }

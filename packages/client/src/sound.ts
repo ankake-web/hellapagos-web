@@ -12,7 +12,8 @@ export type SoundName =
   | 'storm'
   | 'chat'
   | 'win'
-  | 'lose';
+  | 'lose'
+  | 'snake';
 
 const MUTE_KEY = 'hellapagos.muted';
 let muted = readMuted();
@@ -134,6 +135,10 @@ export function playSound(name: SoundName): void {
       break;
     case 'chat':
       tone({ freq: 880, dur: 0.05, type: 'sine', gain: 0.05 });
+      break;
+    case 'snake':
+      noise(0.4, 0.16); // シューッ
+      tone({ freq: 260, to: 120, dur: 0.4, type: 'sawtooth', gain: 0.12 });
       break;
     case 'win':
       [523, 659, 784, 1047].forEach((f, i) =>

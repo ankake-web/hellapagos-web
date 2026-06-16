@@ -1,47 +1,53 @@
-// ===== ゲームの基本型 =====
+// ===== 基本型（公式ルール準拠モデル） =====
 
 export type Phase =
   | 'lobby'
-  | 'action'
-  | 'survival'
-  | 'vote'
-  | 'escape'
+  | 'weather' // 天候公開（演出用の一瞬の状態）
+  | 'action' // ターン制の行動
+  | 'survival' // 生存チェック（カード補填ウィンドウ）
+  | 'vote' // 不足による順次・単独追放
+  | 'escape' // 任意脱出の決断
   | 'gameover';
 
 export type ActionType = 'fish' | 'water' | 'wood' | 'search';
 
-export type WeatherType = 'sunny' | 'rain' | 'storm';
-
-/** AIボットの性格。供出・投票・アイテム使用の傾向が変わる。 */
 export type BotPersona = 'cooperative' | 'hoarder' | 'sniper' | 'coward';
+export type Difficulty = 'easy' | 'normal' | 'hard';
+export type Speed = 'slow' | 'normal' | 'fast';
 
-/** 隠し財産（個人の備蓄）。MVPでは資源を数量で保持する。 */
-export interface Stash {
-  food: number;
-  water: number;
-}
+/** 漂着物カードの種類 */
+export type CardKind =
+  // 資源
+  | 'water_bottle'
+  | 'dirty_water'
+  | 'sandwich'
+  | 'sardine_can'
+  | 'rotten_fish'
+  | 'fruit_basket'
+  // 単発
+  | 'serum'
+  | 'voodoo'
+  | 'sleeping_pills'
+  | 'alarm_clock'
+  // 永続
+  | 'canteen'
+  | 'fishing_rod'
+  | 'axe'
+  | 'crystal_ball'
+  | 'gun'
+  | 'bullet'
+  // 無用品
+  | 'junk';
 
-/** 難破船で見つかる特殊アイテム。 */
-export type ItemKind =
-  | 'gun' // 拳銃：他の生存者を即座に射殺し、所持品を奪う（1回）
-  | 'pills' // 睡眠薬：この追放投票で自分を対象外にする（1回）
-  | 'antidote' // 解毒剤：ヘビの毒（病気）を治す（1回）
-  | 'voodoo' // ブードゥー人形：死者1人を蘇らせる（1回）
-  | 'axe' // 斧：木材集めの収量+1（永続）
-  | 'rod' // 釣り竿：魚釣りの収量+1（永続）
-  | 'filter'; // 浄水器：水汲みの収量+1（永続）
-
-export interface Item {
+export interface Card {
   id: string;
-  kind: ItemKind;
+  kind: CardKind;
 }
 
-/** 永続効果のアイテムか（所持しているだけで効果発動） */
-export const PERMANENT_ITEMS: ReadonlySet<ItemKind> = new Set<ItemKind>(['axe', 'rod', 'filter']);
-
-/** プレイに対象指定が必要なアイテムか */
-export function itemNeedsTarget(kind: ItemKind): boolean {
-  return kind === 'gun' || kind === 'voodoo';
+export interface WeatherCard {
+  /** 降水量 0〜3（その日の水汲み量） */
+  precip: number;
+  hurricane: boolean;
 }
 
 export interface Player {
@@ -51,75 +57,79 @@ export interface Player {
   connected: boolean;
   alive: boolean;
   escaped: boolean;
+  /** ヘビ等で発病：このラウンド終了時の投票に参加不可（対象にはなる） */
   sick: boolean;
-  /** 探索で得た個人の隠し財産（他人には数量のみ公開） */
-  hand: Stash;
-  /** 所持している特殊アイテム（他人には所持数のみ公開） */
-  items: Item[];
-  /** この追放投票で対象外（睡眠薬） */
-  voteImmune?: boolean;
-  /** ボットの性格（人間は undefined）。ゲーム終了時のみ公開される。 */
-  botPersona?: BotPersona;
-  /** その日に選んだ行動（解決までは本人以外に伏せる） */
-  pendingAction?: ActionType;
-  /** 生存判定で共有プールへ供出する量（解決までは伏せる） */
-  contribute?: Stash;
-  /** 追放投票の対象 id（null = 棄権） */
+  /** 次ラウンドの行動・カード使用を不可にする（休み）。survival 前に解除 */
+  resting: boolean;
+  hand: Card[];
+  /** その投票での対象 id（null=棄権、未投票=undefined） */
   vote?: string | null;
-  /** 脱出フェイズの賛否 */
-  escapeVote?: boolean;
-  /** 直近の投票で集めた票数（表示用） */
+  /** 脱出フェイズの賛否（未回答=undefined） */
+  escapeChoice?: boolean;
+  /** 直近の投票で集めた票（表示用） */
   votesReceived?: number;
+  /** その日に行動済みか（生存ウィンドウのパスにも流用） */
+  acted: boolean;
+  botPersona?: BotPersona;
+  difficulty?: Difficulty;
 }
 
 export interface GameConfig {
-  /** いかだの1席あたりに必要な木材 */
-  raftWoodPerSeat: number;
-  /** 脱出時、1席につき確保すべき航海用の水・食料 */
-  voyageProvisionPerSeat: number;
-  /** ゲーム開始時の嵐までの残り日数 */
-  initialStormIn: number;
-  /** ソロサバイバル：単独で脱出した者だけが勝者になるバリアント */
   soleSurvivor: boolean;
-  /** 乱数シード */
+  difficulty: Difficulty;
+  speed: Speed;
   seed: number;
 }
 
 export interface LogEntry {
   id: number;
-  day: number;
-  /** 公開向けの本文 */
+  round: number;
   text: string;
-  /** この出来事に関わる playerId（演出用、任意） */
   playerId?: string;
-  kind?: 'info' | 'good' | 'bad' | 'death' | 'escape';
+  kind?: 'info' | 'good' | 'bad' | 'death' | 'escape' | 'draw' | 'snake' | 'card';
 }
+
+export type VoteReason = 'water' | 'food' | 'hurricane';
 
 export interface GameState {
   phase: Phase;
-  day: number;
+  round: number;
   players: Player[];
-  // 共有トラック
+  // 生存トラック（上限36）
   food: number;
   water: number;
-  wood: number;
-  /** 嵐到来までの残り日数（0 で当日が最終日 = 嵐） */
-  stormIn: number;
-  weather: WeatherType | null;
-  /** リーダー（同票の裁定者）の players インデックス */
+  // 筏トラック
+  raftSeats: number; // 完成座席（最大12）
+  raftProgress: number; // 現在の周回 0..5
+  // 天候
+  weatherDeck: WeatherCard[]; // index0 = 次に公開
+  currentPrecip: number; // 当ラウンドの水汲み量
+  hurricaneRevealed: boolean;
+  // 漂着物
+  deck: Card[];
+  // 進行
   firstPlayerIndex: number;
-  /** 生存判定で不足し、投票で減らすべき人数 */
-  shortage: number;
+  currentActorIndex: number; // 行動フェイズの手番（players のindex）
+  // 投票
+  voteReason?: VoteReason;
+  pendingEliminations: number; // 残り追放人数
+  // 乱数・採番
   rngState: number;
-  itemSeq: number;
+  cardSeq: number;
+  // 一時状態
+  nextParentId?: string | null; // 目覚まし時計で指定された次の親
+  fruitUsed?: boolean; // 当ラウンドにフルーツバスケットで死者ゼロ確定
+  lastWoodGain?: { playerId: string; amount: number }; // 直近の木集めで得た木（血清で失う）
+  // ログ・結果
   log: LogEntry[];
   logSeq: number;
-  /** 脱出に成功した playerId */
   winners: string[];
   config: GameConfig;
+  // 直近の袋引き結果（演出用）
+  lastDraw?: { playerId: string; balls: Array<{ fish: number } | { snake: true }>; action: ActionType };
 }
 
-// ===== 公開（リダクション済み）状態 =====
+// ===== 公開（リダクション済み） =====
 
 export interface PublicPlayer {
   id: string;
@@ -129,51 +139,45 @@ export interface PublicPlayer {
   alive: boolean;
   escaped: boolean;
   sick: boolean;
+  resting: boolean;
+  acted: boolean;
   handCount: number;
-  itemCount: number;
-  voteImmune?: boolean;
-  hasActed: boolean;
-  hasContributed: boolean;
-  hasVoted: boolean;
-  hasEscapeVoted: boolean;
+  /** 永続カード（場に出ている＝公開情報） */
+  permanents: CardKind[];
   votesReceived?: number;
-  /** ゲーム終了時にのみ公開されるボットの性格 */
-  persona?: BotPersona;
-  /** 投票/脱出フェイズ以降に公開される供出量 */
-  contributedFood?: number;
-  contributedWater?: number;
-  // ↓ 閲覧者本人にのみ入る
   isYou: boolean;
-  hand?: Stash;
-  items?: Item[];
-  pendingAction?: ActionType;
-  vote?: string | null;
-  escapeVote?: boolean;
+  hand?: Card[]; // 本人のみ
+  vote?: string | null; // 本人のみ
+  persona?: BotPersona; // gameover時のみ
 }
 
 export interface PublicGameState {
   phase: Phase;
-  day: number;
+  round: number;
   players: PublicPlayer[];
   food: number;
   water: number;
-  wood: number;
-  raftCapacity: number;
-  stormIn: number;
-  isFinalDay: boolean;
-  weather: WeatherType | null;
+  foodCap: number;
+  waterCap: number;
+  raftSeats: number;
+  raftProgress: number;
+  seatsNeeded: number; // = 生存者数
+  currentPrecip: number;
+  hurricaneRevealed: boolean;
+  weatherRemaining: number;
   firstPlayerIndex: number;
-  shortage: number;
-  /** 生存判定で必要な消費量（= 生存者数） */
-  need: number;
+  currentActorId: string | null;
+  voteReason?: VoteReason;
+  pendingEliminations: number;
+  canEscape: boolean;
+  isYourTurn: boolean;
+  youId: string;
+  hostId: string;
+  isSpectator: boolean;
   log: LogEntry[];
   winners: string[];
   config: GameConfig;
-  youId: string;
-  hostId: string;
-  /** 閲覧者が席を持たない観戦者か */
-  isSpectator: boolean;
-  /** 現フェイズの締切（epoch ms）。締切後は未提出をデフォルト処理 */
+  lastDraw?: GameState['lastDraw'];
   deadlineAt?: number;
 }
 
@@ -182,10 +186,9 @@ export interface ChatMessage {
   name: string;
   text: string;
   isSpectator: boolean;
-  day: number;
+  round: number;
 }
 
-/** サーバ側で集計する通算戦績（名前単位）。 */
 export interface LeaderboardEntry {
   name: string;
   games: number;
@@ -193,7 +196,7 @@ export interface LeaderboardEntry {
   wins: number;
 }
 
-// ===== Socket.IO イベント型 =====
+// ===== Socket.IO イベント =====
 
 export type Ack =
   | { ok: true; roomId: string; playerId: string; spectator?: boolean }
@@ -212,12 +215,12 @@ export interface ClientToServerEvents {
   'room:rejoin': (p: { roomId: string; playerId: string }, cb: (res: Ack) => void) => void;
   'room:addBot': () => void;
   'room:removeBot': (p: { botId: string }) => void;
-  'game:setConfig': (p: { soleSurvivor: boolean }) => void;
+  'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed }) => void;
   'game:start': () => void;
-  'action:choose': (p: { action: ActionType }) => void;
-  'survival:contribute': (p: { food: number; water: number }) => void;
+  'action:choose': (p: { action: ActionType; woodPush?: number }) => void;
+  'card:play': (p: { cardId: string; targetId?: string | null }) => void;
+  'survival:pass': () => void;
   'vote:cast': (p: { targetId: string | null }) => void;
   'escape:vote': (p: { leave: boolean }) => void;
-  'item:play': (p: { itemId: string; targetId?: string | null }) => void;
   'chat:say': (p: { text: string }) => void;
 }
