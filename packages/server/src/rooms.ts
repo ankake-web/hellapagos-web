@@ -290,7 +290,22 @@ export class RoomManager {
         if (room.voteKey !== key) {
           room.voteKey = key;
           this.botTaunt(room);
-          for (const p of alivePlayers(s).filter((x) => this.isAuto(x) && !x.sick)) {
+          // 狙撃手CPU：弾を持つなら裕福な相手を撃って人数を削る
+          for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && x.botPersona === 'sniper')) {
+            if (awaiting(room.state) !== 'vote') break;
+            const cur = this.live(room, p.id);
+            const gun = cur?.hand.find((c) => c.kind === 'gun');
+            const bullet = cur?.hand.find((c) => c.kind === 'bullet');
+            const r = rngFor(room.state, p.id.charCodeAt(0) + 9);
+            if (gun && bullet && r.chance(0.6)) {
+              const rich = alivePlayers(room.state)
+                .filter((t) => t.id !== p.id)
+                .sort((a, b) => b.hand.length - a.hand.length)[0];
+              if (rich) room.state = playCard(room.state, p.id, gun.id, rich.id);
+            }
+          }
+          if (awaiting(room.state) !== 'vote') continue;
+          for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && !x.sick)) {
             const r = rngFor(room.state, p.id.charCodeAt(p.id.length - 1));
             room.state = castVote(room.state, p.id, aiVote(room.state, this.live(room, p.id)!, r));
           }
@@ -354,6 +369,12 @@ export class RoomManager {
         if (line) this.postChat(room, bot.name, line, false);
       }
       room.state = takeAction(room.state, botId, decision.action, decision.woodPush);
+      // 噛まれたら血清で治す（手番を失わないため）
+      const after = this.live(room, botId);
+      if (after?.sick) {
+        const serum = after.hand.find((c) => c.kind === 'serum');
+        if (serum) room.state = playCard(room.state, botId, serum.id);
+      }
       this.drive(room);
     }, delay);
   }
