@@ -153,7 +153,11 @@ function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameSta
       <span className="draw-who">{who} の{draw.action === 'fish' ? '釣り' : '木集め'}</span>
       <Balls balls={draw.balls} action={draw.action} />
       <span className="draw-sum">
-        {snake ? '🐍 噛まれた！' : draw.action === 'fish' ? (fishTotal > 0 ? `🐟 食料 +${fishTotal}` : '不漁…') : `木 +${draw.balls.length}`}
+        {snake
+          ? '🐍 噛まれた！追加分は失う（確定分の木は確保）'
+          : draw.action === 'fish'
+            ? (fishTotal > 0 ? `🐟 食料 +${fishTotal}` : '不漁…')
+            : `🪵 木 +${draw.balls.length}`}
       </span>
     </div>
   );
@@ -665,7 +669,7 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
   );
   return (
     <div className="overlay">
-      <div className="result">
+      <div className={`result ${view.isSpectator ? '' : youWon ? 'win' : 'lose'}`}>
         <h2>{headline}</h2>
         {sole && <span className="tag spectate">ソロサバイバル</span>}
         {!view.isSpectator && verdict && <p className={`verdict ${youWon ? 'win' : 'lose'}`}>{verdict}</p>}

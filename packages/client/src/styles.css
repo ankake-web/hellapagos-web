@@ -261,9 +261,12 @@ h1, h2, h3, h4 { margin: 0; }
 .action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.7rem; }
 @media (max-width: 520px) { .action-grid { grid-template-columns: 1fr; } }
 .btn.action {
-  display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 1rem 0.8rem; font-size: 1.05rem; min-height: 76px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+  display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 1rem 0.8rem; font-size: 1.05rem; min-height: 78px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.02));
+  transition: transform 0.1s var(--ease), background 0.15s, box-shadow 0.15s;
 }
+.btn.action:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32); background: linear-gradient(180deg, rgba(255, 200, 120, 0.16), rgba(255, 255, 255, 0.03)); }
+.btn.action:active:not(:disabled) { transform: translateY(1px); }
 .btn.action .sub { font-size: 0.68rem; color: var(--muted); font-weight: 500; }
 .wood-action { cursor: default; background: rgba(0, 0, 0, 0.22); }
 .wood-push { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.5rem; width: 100%; }
@@ -376,14 +379,15 @@ h1, h2, h3, h4 { margin: 0; }
 .fx-flash.storm { background: rgba(225, 242, 255, 0.62); }
 @keyframes flashfx { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
 .event-card {
-  position: fixed; top: 21%; left: 50%; transform: translateX(-50%); z-index: 22;
-  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
-  padding: 1rem 1.9rem; border-radius: 18px; background: rgba(8, 18, 24, 0.92);
-  box-shadow: var(--shadow); pointer-events: none; max-width: 92vw; text-align: center;
+  position: fixed; top: 20%; left: 50%; transform: translateX(-50%); z-index: 22;
+  display: flex; flex-direction: column; align-items: center; gap: 0.45rem;
+  padding: 1.1rem 2rem; border-radius: 18px; background: rgba(8, 18, 24, 0.94);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  pointer-events: none; max-width: min(440px, 92vw); text-align: center;
   animation: evpop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both;
 }
-.event-card .ev-ic { font-size: 2.8rem; animation: evicon 1.6s ease-in-out; }
-.event-card .ev-text { font-weight: 800; font-size: 1.05rem; }
+.event-card .ev-ic { font-size: 3rem; animation: evicon 1.6s ease-in-out; }
+.event-card .ev-text { font-weight: 800; font-size: 1.08rem; line-height: 1.45; }
 .event-card.death { border: 1px solid var(--danger); color: #ff9a9a; }
 .event-card.snake { border: 1px solid var(--danger); color: #ffd28a; }
 .event-card.escape { border: 1px solid var(--escape); color: var(--escape); }
@@ -404,8 +408,12 @@ html.fx-shake .board { animation: shake 0.46s ease-in-out; }
 
 /* ===== オーバーレイ・結果・モーダル ===== */
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.66); display: flex; justify-content: center; align-items: center; padding: 1rem; z-index: 50; backdrop-filter: blur(3px); animation: fadein 0.2s ease-out; }
-.result { padding: 1.8rem; width: min(560px, 100%); text-align: center; }
-.result h2 { font-size: 1.7rem; margin-bottom: 0.3rem; }
+.result { padding: 2rem 1.8rem; width: min(560px, 100%); text-align: center; box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.1); animation: resultin 0.45s var(--ease-out) both; }
+@keyframes resultin { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+.result.win { box-shadow: 0 0 0 1px rgba(95, 211, 154, 0.6) inset, 0 0 70px rgba(95, 211, 154, 0.22), var(--shadow-lg); }
+.result.lose { box-shadow: 0 0 0 1px rgba(255, 111, 111, 0.5) inset, 0 0 70px rgba(255, 111, 111, 0.16), var(--shadow-lg); }
+.result h2 { font-size: 1.9rem; margin-bottom: 0.3rem; letter-spacing: 0.02em; background: linear-gradient(180deg, #fff 0%, var(--sand) 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.result.win h2 { background: linear-gradient(180deg, #fff 0%, var(--good) 110%); -webkit-background-clip: text; background-clip: text; }
 .verdict { font-size: 1.15rem; font-weight: 800; }
 .verdict.win { color: var(--good); }
 .verdict.lose { color: var(--danger); }

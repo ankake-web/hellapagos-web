@@ -71,6 +71,22 @@ interface ServerRoom {
   negotiateUntil: number; // 交渉ウィンドウ終了 epoch ms
   negTimer?: ReturnType<typeof setTimeout>;
   lastReplyAt: number; // 直近のCPU反応返信の時刻
+  // 演出の「ため」：蛇/死亡/脱出/ハリケーンの直後に少し止めて見せる
+  holdUntil?: number;
+  holdTimer?: ReturnType<typeof setTimeout>;
+  lastDramaId?: number; // 直近で「ため」を入れた劇的ログのid
+}
+
+// 劇的イベント後の演出ホールド（ミリ秒）。速度設定に依らず必ず見えるよう固定。
+const DRAMA_HOLD_MS = 2400;
+/** 直近の「劇的」ログ（蛇・死亡・脱出・ハリケーン）のid。無ければ -1。 */
+function latestDramaId(s: GameState): number {
+  let id = -1;
+  for (const e of s.log) {
+    const dramatic = e.kind === 'snake' || e.kind === 'death' || e.kind === 'escape' || e.text.includes('ハリケーン');
+    if (dramatic && e.id > id) id = e.id;
+  }
+  return id;
 }
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -273,6 +289,18 @@ export class RoomManager {
         return;
       }
 
+      // 劇的イベント（蛇・死亡・脱出・ハリケーン）の直後は少し止めて、演出を見せる。
+      const dId = latestDramaId(s);
+      if (dId > (room.lastDramaId ?? -1)) {
+        room.lastDramaId = dId;
+        room.holdUntil = Date.now() + DRAMA_HOLD_MS;
+      }
+      if (room.holdUntil && Date.now() < room.holdUntil) {
+        this.broadcast(room);
+        this.scheduleHold(room, room.holdUntil - Date.now());
+        return;
+      }
+
       if (aw === 'action') {
         const actorId = currentActorId(s);
         const actor = actorId ? s.players.find((p) => p.id === actorId) : undefined;
@@ -450,6 +478,14 @@ export class RoomManager {
       this.drive(room);
     }, Math.max(300, ms));
   }
+  /** 演出ホールド：劇的イベントの直後に少しだけ進行を止める。 */
+  private scheduleHold(room: ServerRoom, ms: number): void {
+    if (room.holdTimer) return;
+    room.holdTimer = setTimeout(() => {
+      room.holdTimer = undefined;
+      this.drive(room);
+    }, Math.max(200, ms));
+  }
 
   /** 投票フェイズ：各CPUが一言（交渉/告発/はったり）を述べ、投票意図を保持する。
    *  APIキーがあれば LLM、無ければ文脈付きスクリプトでフォールバック。 */
@@ -575,10 +611,12 @@ export class RoomManager {
     if (room.botTimer) clearTimeout(room.botTimer);
     if (room.deadline) clearTimeout(room.deadline);
     if (room.negTimer) clearTimeout(room.negTimer);
+    if (room.holdTimer) clearTimeout(room.holdTimer);
     room.botTimer = undefined;
     room.deadline = undefined;
     room.deadlineAt = undefined;
     room.negTimer = undefined;
+    room.holdTimer = undefined;
   }
 
   // ===== チャット =====
