@@ -20,8 +20,39 @@ export function Home({ onCreate, onJoin, stats }: Props) {
   return (
     <div className="home">
       <div className="home-card">
-        <h1>🏝️ ヘルパゴス</h1>
-        <p className="subtitle">無人島ニセ協力サバイバル。嵐が来る前に、いかだで脱出せよ。</p>
+        <svg className="hero" viewBox="0 0 320 130" aria-hidden>
+          <defs>
+            <radialGradient id="hsun" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#ffe7a8" />
+              <stop offset="100%" stopColor="#ffb24d" />
+            </radialGradient>
+            <linearGradient id="hsea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#1d6e84" />
+              <stop offset="100%" stopColor="#0c3a47" />
+            </linearGradient>
+          </defs>
+          <circle cx="245" cy="42" r="26" fill="url(#hsun)" opacity="0.9" />
+          <rect x="0" y="78" width="320" height="52" fill="url(#hsea)" />
+          <path d="M0 86 q40 -8 80 0 t80 0 t80 0 t80 0 V130 H0 Z" fill="#11505f" opacity="0.7" />
+          <path d="M0 96 q40 -7 80 0 t80 0 t80 0 t80 0 V130 H0 Z" fill="#0a3a47" opacity="0.8" />
+          {/* 島 */}
+          <ellipse cx="120" cy="92" rx="46" ry="12" fill="#d9be84" />
+          <path d="M120 92 q-3 -26 -14 -34 q18 6 14 34" fill="#3f8f5f" />
+          <path d="M120 92 q3 -28 16 -33 q-20 5 -16 33" fill="#4fa06c" />
+          <rect x="118" y="64" width="4" height="30" rx="2" fill="#7c4f2e" />
+          {/* いかだ */}
+          <g transform="translate(214 100)">
+            <rect x="0" y="0" width="34" height="7" rx="2" fill="#7c4f2e" />
+            <rect x="0" y="-2" width="5" height="11" rx="1.5" fill="#5e3a20" />
+            <rect x="10" y="-2" width="5" height="11" rx="1.5" fill="#5e3a20" />
+            <rect x="20" y="-2" width="5" height="11" rx="1.5" fill="#5e3a20" />
+            <rect x="29" y="-2" width="5" height="11" rx="1.5" fill="#5e3a20" />
+            <rect x="15" y="-22" width="3" height="22" fill="#9c6b3e" />
+            <path d="M18 -22 L34 -12 L18 -8 Z" fill="#eae0cf" />
+          </g>
+        </svg>
+        <h1>ヘルパゴス</h1>
+        <p className="subtitle">無人島ニセ協力サバイバル。<br />嵐が来る前に、いかだで脱出せよ。</p>
 
         <div className="home-links">
           <button className="btn ghost small" onClick={() => setShowRules(true)}>

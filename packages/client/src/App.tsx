@@ -4,6 +4,7 @@ import { api, clearSession, loadSession, saveSession, type Session } from './api
 import { socket } from './socket.js';
 import { isMuted, playSound, toggleMute } from './sound.js';
 import { loadStats, recordResult, type Stats } from './stats.js';
+import { Backdrop } from './components/Backdrop.js';
 import { Home } from './components/Home.js';
 import { Lobby } from './components/Lobby.js';
 import { Board } from './components/Board.js';
@@ -178,6 +179,7 @@ export function App() {
 
   return (
     <div className="app">
+      <Backdrop />
       <button
         className="mute-btn"
         title={muted ? 'ミュート中' : '効果音オン'}
