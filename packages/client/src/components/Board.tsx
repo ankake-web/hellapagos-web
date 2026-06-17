@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPlayer } from '@hellapagos/shared';
 import { CARD_INFO, MAX_SEATS, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
@@ -64,6 +64,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
       <RoundSplash view={view} />
       <DrawCenter view={view} draw={freshDraw} />
       <EventFX view={view} />
+      <FlyLayer view={view} />
       {targeting && (
         <div className="banner target">
           {CARD_INFO[targeting.card.kind].icon} {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
@@ -182,9 +183,9 @@ function Tracks({ view }: { view: PublicGameState }) {
   const need = view.seatsNeeded;
   return (
     <div className="tracks">
-      <Track icon="🐟" label="食料" value={view.food} need={need} cap={view.foodCap} />
-      <Track icon="💧" label="水" value={view.water} need={need} cap={view.waterCap} />
-      <div className="track raft">
+      <Track icon="🐟" label="食料" value={view.food} need={need} cap={view.foodCap} flyKey="food" />
+      <Track icon="💧" label="水" value={view.water} need={need} cap={view.waterCap} flyKey="water" />
+      <div className="track raft" data-fly="raft">
         <div className="track-head">
           <span>🛶 座席</span>
           <strong className={view.raftSeats >= need ? 'ok' : 'short'}>{view.raftSeats} / {need}</strong>
@@ -199,10 +200,10 @@ function Tracks({ view }: { view: PublicGameState }) {
     </div>
   );
 }
-function Track({ icon, label, value, need, cap }: { icon: string; label: string; value: number; need: number; cap: number }) {
+function Track({ icon, label, value, need, cap, flyKey }: { icon: string; label: string; value: number; need: number; cap: number; flyKey?: string }) {
   const short = value < need;
   return (
-    <div className="track">
+    <div className="track" data-fly={flyKey}>
       <div className="track-head">
         <span>{icon} {label}</span>
         <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}<small> / 必要{need}</small></strong>
@@ -226,7 +227,7 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
   const isActor = view.currentActorId === p.id;
   const myDraw = draw && draw.playerId === p.id ? draw : null;
   return (
-    <div className={`pcard ${dead ? 'dead' : ''} ${p.escaped ? 'escaped' : ''} ${isActor ? 'actor' : ''} ${targetable ? 'targetable' : ''}`} onClick={targetable ? onPick : undefined}>
+    <div className={`pcard ${dead ? 'dead' : ''} ${p.escaped ? 'escaped' : ''} ${isActor ? 'actor' : ''} ${targetable ? 'targetable' : ''}`} data-pid={p.id} onClick={targetable ? onPick : undefined}>
       <div className="pcard-top">
         <span className="pname">{p.isBot ? '🤖' : '🧍'} {p.name}</span>
         {p.id === view.hostId && <span className="tag host">主</span>}
@@ -537,6 +538,73 @@ function WeatherFX({ view }: { view: PublicGameState }) {
     );
   }
   return <div className="wfx wfx-sun" aria-hidden />;
+}
+
+interface Flight { key: string; icon: string; x: number; y: number; dx: number; dy: number; delay: number }
+const GAIN_ICON: Record<string, string> = { food: '🐟', water: '💧', wood: '🪵', card: '🃏' };
+
+/** 資源・カード獲得の演出：トークンが取得元から場（資源カウンタ/筏）やプレイヤーへ1個ずつ飛ぶ。 */
+function FlyLayer({ view }: { view: PublicGameState }) {
+  const [flights, setFlights] = useState<Flight[]>([]);
+  // マウント時点の lastGain は「過去の獲得」なので再生しない（再接続/リロード対策）。
+  const seen = useRef(view.lastGain?.id ?? -1);
+  const timers = useRef<number[]>([]);
+  useEffect(() => () => { timers.current.forEach((id) => window.clearTimeout(id)); }, []);
+  const g = view.lastGain;
+  useEffect(() => {
+    if (!g || g.id === seen.current) return;
+    seen.current = g.id;
+    const centerOf = (el: Element | null): { x: number; y: number } | null => {
+      const r = el?.getBoundingClientRect();
+      return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    };
+    const pcard = document.querySelector(`[data-pid="${g.playerId}"]`);
+    let src: { x: number; y: number } | null;
+    let tgt: { x: number; y: number } | null;
+    if (g.kind === 'card') {
+      // カードは山札（上中央）からそのプレイヤーへ飛ぶ
+      src = { x: window.innerWidth / 2, y: 84 };
+      tgt = centerOf(pcard);
+    } else {
+      const sel = g.kind === 'food' ? '[data-fly="food"]' : g.kind === 'water' ? '[data-fly="water"]' : '[data-fly="raft"]';
+      src = centerOf(pcard) ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+      tgt = centerOf(document.querySelector(sel));
+    }
+    if (!src || !tgt) return;
+    const n = Math.min(Math.max(1, g.amount), 6);
+    const id0 = g.id;
+    const arr: Flight[] = Array.from({ length: n }, (_, i) => ({
+      key: `${id0}-${i}`,
+      icon: GAIN_ICON[g.kind] ?? '✨',
+      x: src!.x,
+      y: src!.y,
+      dx: tgt!.x - src!.x,
+      dy: tgt!.y - src!.y,
+      delay: i * 0.12,
+    }));
+    setFlights((f) => [...f, ...arr]);
+    // 各獲得のトークンは自前のタイマーで必ず消す。クリーンアップで前回分を消さない
+    // （deps変化時に前のタイマーをclearすると、前回トークンが残り続けるため）。
+    const t = window.setTimeout(() => setFlights((f) => f.filter((x) => !x.key.startsWith(`${id0}-`))), 850 + n * 130);
+    timers.current.push(t);
+  }, [g?.id]);
+  if (flights.length === 0) return null;
+  return (
+    <div className="fly-layer" aria-hidden>
+      {flights.map((f) => {
+        const style: Record<string, string> = {
+          left: `${f.x}px`,
+          top: `${f.y}px`,
+          animationDelay: `${f.delay}s`,
+          '--fdx': `${f.dx}px`,
+          '--fdy': `${f.dy}px`,
+        };
+        return (
+          <span key={f.key} className="fly-token" style={style as CSSProperties}>{f.icon}</span>
+        );
+      })}
+    </div>
+  );
 }
 
 const EV_META: Record<string, { ic: string; cls: string }> = {

@@ -18,6 +18,7 @@ import type {
   BotPersona,
   Card,
   CardKind,
+  GainKind,
   GameConfig,
   GameState,
   Player,
@@ -41,6 +42,16 @@ function hasCard(p: Player, kind: CardKind): boolean {
 }
 export function hasPermanent(p: Player, kind: CardKind): boolean {
   return hasCard(p, kind);
+}
+/** 永続カードを「使用済み（公開）」として記録（使うまで他者には伏せられる）。 */
+function reveal(p: Player, kind: CardKind): void {
+  if (hasCard(p, kind) && !p.revealed.includes(kind)) p.revealed.push(kind);
+}
+/** 資源・カード獲得を演出用に記録（飛んでいくトークン）。 */
+function recordGain(s: GameState, playerId: string, kind: GainKind, amount: number): void {
+  if (amount <= 0) return;
+  s.eventSeq += 1;
+  s.lastGain = { id: s.eventSeq, playerId, kind, amount };
 }
 function clampSupply(n: number): number {
   return Math.max(0, Math.min(RESOURCE_CAP, n));
@@ -95,6 +106,7 @@ function newPlayer(p: NewPlayer): Player {
     resting: false,
     hand: [],
     acted: false,
+    revealed: [],
     botPersona: p.botPersona,
   };
 }
@@ -118,6 +130,7 @@ export function createGame(initial: NewPlayer[], config: Partial<GameConfig> = {
     pendingEliminations: 0,
     rngState: cfg.seed,
     cardSeq: 0,
+    eventSeq: 0,
     log: [],
     logSeq: 0,
     winners: [],
@@ -255,7 +268,9 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
       } else {
         const gain = ball.fish * (hasPermanent(p, 'fishing_rod') ? 2 : 1);
         d.food = clampSupply(d.food + gain);
+        if (hasPermanent(p, 'fishing_rod')) reveal(p, 'fishing_rod');
         d.lastDraw = { playerId, balls: [ball], action };
+        recordGain(d, playerId, 'food', gain);
         pushLog(d, `${p.name} は釣り：魚 ${ball.fish}${hasPermanent(p, 'fishing_rod') ? '×2' : ''} で食料 +${gain}。`, 'good', playerId);
       }
       break;
@@ -267,12 +282,15 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
         pushLog(d, `${p.name} は水汲み：雨がなく汲めなかった。`, 'info', playerId);
       } else {
         d.water = clampSupply(d.water + gain);
+        if (mult > 1) reveal(p, 'canteen');
+        recordGain(d, playerId, 'water', gain);
         pushLog(d, `${p.name} は水汲み：水 +${gain}（降水量${d.currentPrecip}${mult > 1 ? '×2' : ''}）。`, 'good', playerId);
       }
       break;
     }
     case 'wood': {
       const base = 1 + (hasPermanent(p, 'axe') ? 1 : 0);
+      if (hasPermanent(p, 'axe')) reveal(p, 'axe');
       addWood(d, base);
       let gained = base;
       const push = Math.max(0, Math.min(5, Math.floor(woodPush)));
@@ -281,23 +299,25 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
         d.lastDraw = { playerId, balls, action };
         if (balls.some(isSnake)) {
           p.sick = true;
-          pushLog(d, `${p.name} は木集めで${push}個引き、🐍ヘビに噛まれた！追加の木はなし（病気）。`, 'snake', playerId);
+          pushLog(d, `${p.name} は木集めで${push}本引いて🐍ヘビに噛まれた！追加分は失ったが確定分の木+${base}は確保（病気で次R休み）。`, 'snake', playerId);
         } else {
           addWood(d, push);
           gained += push;
-          pushLog(d, `${p.name} は木集めで${push}個引き、木 +${push}（無事）。`, 'good', playerId);
+          pushLog(d, `${p.name} は木集めで${push}本引き、木 +${gained}（無事）。`, 'good', playerId);
         }
       } else {
         d.lastDraw = { playerId, balls: [], action };
         pushLog(d, `${p.name} は木を集めた（+${base}）。`, 'good', playerId);
       }
       d.lastWoodGain = { playerId, amount: gained };
+      recordGain(d, playerId, 'wood', gained);
       break;
     }
     case 'search': {
       const card = d.deck.shift();
       if (card) {
         p.hand.push(card);
+        recordGain(d, playerId, 'card', 1);
         pushLog(d, `${p.name} は難破船を漁り、カードを1枚得た。`, 'card', playerId);
       } else {
         pushLog(d, `${p.name} は難破船を漁ったが山札は尽きていた。`, 'info', playerId);
@@ -419,6 +439,7 @@ export function castVote(s: GameState, playerId: string, targetId: string | null
     if (t && t.alive && !t.escaped && t.id !== playerId) valid = targetId;
   }
   voter.vote = valid;
+  if (hasCard(voter, 'crystal_ball')) reveal(voter, 'crystal_ball');
   return d;
 }
 export function isVoteReady(s: GameState): boolean {
@@ -658,6 +679,7 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
       const t = targetId ? find(d, targetId) : undefined;
       if (!t || !t.alive || t.escaped || t.id === playerId) return s;
       removeOneCard(p, 'bullet');
+      reveal(p, 'gun');
       // 撃った側が被害者の手札を得る
       for (const card2 of t.hand) p.hand.push(card2);
       t.hand = [];

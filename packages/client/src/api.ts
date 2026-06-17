@@ -11,6 +11,7 @@ export const api = {
   createRoom: (name: string) => new Promise<Ack>((r) => socket.emit('room:create', { name }, r)),
   joinRoom: (roomId: string, name: string) => new Promise<Ack>((r) => socket.emit('room:join', { roomId, name }, r)),
   rejoin: (roomId: string, playerId: string) => new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId }, r)),
+  leaveRoom: () => socket.emit('room:leave'),
   addBot: () => socket.emit('room:addBot'),
   removeBot: (botId: string) => socket.emit('room:removeBot', { botId }),
   setConfig: (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) =>

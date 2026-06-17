@@ -64,7 +64,7 @@ io.on('connection', (socket) => {
   socket.on('room:join', ({ roomId, name }, cb) => {
     try {
       const { playerId, spectator } = manager.joinRoom(roomId, name, socket.id);
-      cb?.({ ok: true, roomId: roomId.toUpperCase(), playerId, spectator });
+      cb?.({ ok: true, roomId: roomId.replace(/\D/g, ''), playerId, spectator });
     } catch (err) {
       const message = err instanceof GameError ? err.message : '参加に失敗しました。';
       cb?.({ ok: false, error: message });
@@ -74,13 +74,14 @@ io.on('connection', (socket) => {
   socket.on('room:rejoin', ({ roomId, playerId }, cb) => {
     try {
       manager.rejoin(roomId, playerId, socket.id);
-      cb?.({ ok: true, roomId: roomId.toUpperCase(), playerId });
+      cb?.({ ok: true, roomId: roomId.replace(/\D/g, ''), playerId });
     } catch (err) {
       const message = err instanceof GameError ? err.message : '復帰に失敗しました。';
       cb?.({ ok: false, error: message });
     }
   });
 
+  socket.on('room:leave', () => guard(socket.id, () => manager.leaveRoom(socket.id)));
   socket.on('room:addBot', () => guard(socket.id, () => manager.addBot(socket.id)));
   socket.on('room:removeBot', ({ botId }) => guard(socket.id, () => manager.removeBot(socket.id, botId)));
   socket.on('game:setConfig', (p) => guard(socket.id, () => manager.setRoomConfig(socket.id, p)));

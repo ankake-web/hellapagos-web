@@ -17,11 +17,11 @@ interface Props {
 export function Home({ onCreate, onJoin, stats }: Props) {
   const urlRoom = new URLSearchParams(window.location.search).get('room') ?? '';
   const [name, setName] = useState(suggestName);
-  const [roomId, setRoomId] = useState(urlRoom.toUpperCase());
+  const [roomId, setRoomId] = useState(urlRoom.replace(/\D/g, '').slice(0, 4));
   const [showRules, setShowRules] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
   const trimmed = name.trim();
-  const room = roomId.toUpperCase();
+  const room = roomId.replace(/\D/g, '');
 
   return (
     <div className="home">
@@ -95,14 +95,14 @@ export function Home({ onCreate, onJoin, stats }: Props) {
           <input
             value={roomId}
             maxLength={4}
-            placeholder="ABCD"
+            placeholder="1234"
             className="roomid-input"
             autoComplete="off"
             autoCorrect="off"
-            autoCapitalize="characters"
             spellCheck={false}
-            inputMode="text"
-            onChange={(e) => setRoomId(e.target.value)}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            onChange={(e) => setRoomId(e.target.value.replace(/\D/g, '').slice(0, 4))}
           />
         </label>
         <button

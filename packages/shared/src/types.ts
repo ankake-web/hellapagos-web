@@ -70,6 +70,8 @@ export interface Player {
   votesReceived?: number;
   /** その日に行動済みか（生存ウィンドウのパスにも流用） */
   acted: boolean;
+  /** 使用して公開済みの永続カード種別（斧・銃など。使うまで他者には非公開） */
+  revealed: CardKind[];
   botPersona?: BotPersona;
   difficulty?: Difficulty;
 }
@@ -92,6 +94,9 @@ export interface LogEntry {
 }
 
 export type VoteReason = 'water' | 'food' | 'hurricane';
+
+/** 資源・カード獲得の演出（飛んでいくトークン）用の種別 */
+export type GainKind = 'food' | 'water' | 'wood' | 'card';
 
 export interface GameState {
   phase: Phase;
@@ -129,6 +134,9 @@ export interface GameState {
   config: GameConfig;
   // 直近の袋引き結果（演出用）
   lastDraw?: { playerId: string; balls: Array<{ fish: number } | { snake: true }>; action: ActionType };
+  // 演出用：直近の資源・カード獲得（飛んでいくトークン）
+  eventSeq: number;
+  lastGain?: { id: number; playerId: string; kind: GainKind; amount: number };
 }
 
 // ===== 公開（リダクション済み） =====
@@ -180,6 +188,7 @@ export interface PublicGameState {
   winners: string[];
   config: GameConfig;
   lastDraw?: GameState['lastDraw'];
+  lastGain?: GameState['lastGain'];
   deadlineAt?: number;
 }
 
@@ -215,6 +224,7 @@ export interface ClientToServerEvents {
   'room:create': (p: { name: string }, cb: (res: Ack) => void) => void;
   'room:join': (p: { roomId: string; name: string }, cb: (res: Ack) => void) => void;
   'room:rejoin': (p: { roomId: string; playerId: string }, cb: (res: Ack) => void) => void;
+  'room:leave': () => void;
   'room:addBot': () => void;
   'room:removeBot': (p: { botId: string }) => void;
   'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) => void;

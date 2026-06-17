@@ -7,7 +7,10 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
   const actorId = currentActorId(s);
   const players: PublicPlayer[] = s.players.map((p) => {
     const isYou = p.id === viewerId;
-    const permanents = p.hand.filter((c) => PERMANENT_KINDS.has(c.kind)).map((c) => c.kind as CardKind);
+    // 永続カードは「使うまで」他者に伏せる。本人は自分の所持を常に見える。
+    const heldPerms = p.hand.filter((c) => PERMANENT_KINDS.has(c.kind)).map((c) => c.kind as CardKind);
+    const revealed = p.revealed ?? [];
+    const permanents = isYou ? heldPerms : heldPerms.filter((k) => revealed.includes(k));
     return {
       id: p.id,
       name: p.name,
@@ -55,5 +58,6 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
     winners: s.winners,
     config: s.config,
     lastDraw: s.lastDraw,
+    lastGain: s.lastGain,
   };
 }

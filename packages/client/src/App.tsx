@@ -8,6 +8,7 @@ import { Backdrop } from './components/Backdrop.js';
 import { Home } from './components/Home.js';
 import { Lobby } from './components/Lobby.js';
 import { Board } from './components/Board.js';
+import { Menu } from './components/Menu.js';
 
 export function App() {
   const [view, setView] = useState<PublicGameState | null>(null);
@@ -158,6 +159,7 @@ export function App() {
   };
 
   const leave = () => {
+    api.leaveRoom();
     clearSession();
     setSession(null);
     setView(null);
@@ -187,6 +189,7 @@ export function App() {
       >
         {muted ? '🔇' : '🔊'}
       </button>
+      {session && view && <Menu midGame={view.phase !== 'lobby'} onLeave={leave} />}
       {showConnBanner && <div className="banner warn">サーバへ接続中…</div>}
       {error && <div className="toast">{error}</div>}
       {screen}

@@ -121,7 +121,7 @@ export function Lobby({ view, onLeave }: Props) {
 // localStorage 経由のセッションを使う。ここでは表示用に URL/保存値から復元する。
 function roomCodeOf(_view: PublicGameState): string {
   const fromUrl = new URLSearchParams(window.location.search).get('room');
-  if (fromUrl) return fromUrl.toUpperCase();
+  if (fromUrl) return fromUrl.replace(/\D/g, '');
   try {
     const raw = localStorage.getItem('hellapagos.session');
     if (raw) return (JSON.parse(raw) as { roomId: string }).roomId;

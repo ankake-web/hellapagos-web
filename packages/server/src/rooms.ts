@@ -83,6 +83,21 @@ function genId(len: number): string {
   for (let i = 0; i < len; i++) o += a[b[i] % a.length];
   return o;
 }
+/** ルームコードは数字のみ（共有しやすく入力もテンキーで済む）。偏りを避け 0-249 を採用。 */
+function genRoomId(len = 4): string {
+  const b = new Uint8Array(len * 3);
+  globalThis.crypto.getRandomValues(b);
+  let o = '';
+  for (let i = 0; i < b.length && o.length < len; i++) {
+    if (b[i] < 250) o += String(b[i] % 10);
+  }
+  while (o.length < len) o += '0';
+  return o;
+}
+/** 入力ゆれを吸収してルームコードを数字のみに正規化。 */
+function normRoomId(roomId: string): string {
+  return String(roomId).replace(/\D/g, '');
+}
 function rngFor(s: GameState, salt: number): Rng {
   return new Rng(s.rngState + s.round * 131 + salt * 17 + 1);
 }
@@ -94,8 +109,8 @@ export class RoomManager {
 
   // ===== ロビー =====
   createRoom(name: string, socketId: string): { roomId: string; playerId: string } {
-    let roomId = genId(4);
-    while (this.rooms.has(roomId)) roomId = genId(4);
+    let roomId = genRoomId();
+    while (this.rooms.has(roomId)) roomId = genRoomId();
     const playerId = genId(8);
     const room: ServerRoom = {
       id: roomId,
@@ -213,6 +228,11 @@ export class RoomManager {
     const { room, playerId } = this.ctx(socketId);
     room.state = setEscapeChoice(room.state, playerId, leave);
     this.drive(room);
+  }
+
+  // 明示的な退出（トップへ戻る）。切断と同じ扱い：ロビーなら離脱、ゲーム中は席をAIが引き継ぐ。
+  leaveRoom(socketId: string): void {
+    this.handleDisconnect(socketId);
   }
 
   // ===== 切断 =====
@@ -608,7 +628,7 @@ export class RoomManager {
 
   // ===== 内部 =====
   private requireRoom(roomId: string): ServerRoom {
-    const room = this.rooms.get(roomId.toUpperCase());
+    const room = this.rooms.get(normRoomId(roomId));
     if (!room) throw new GameError('NO_ROOM', 'ルームが見つかりません。');
     return room;
   }
