@@ -58,9 +58,10 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
   return (
     <div className={`board ${weatherClass}`}>
       <Header view={view} />
+      <WeatherFX view={view} />
       <RoundSplash view={view} />
       <DrawResult view={view} />
-      <EventBanner view={view} />
+      <EventFX view={view} />
       {targeting && (
         <div className="banner target">
           {CARD_INFO[targeting.card.kind].icon} {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
@@ -407,19 +408,61 @@ function DrawResult({ view }: { view: PublicGameState }) {
   );
 }
 
-function EventBanner({ view }: { view: PublicGameState }) {
-  const notable = [...view.log].reverse().find((e) => e.kind === 'death' || e.kind === 'escape' || e.text.includes('ハリケーン'));
-  const [shown, setShown] = useState<number | null>(null);
-  const [visible, setVisible] = useState(false);
+/** 天候の常時エフェクト：雨が降る／晴れの陽射し／嵐の稲妻＋豪雨。 */
+function WeatherFX({ view }: { view: PublicGameState }) {
+  if (view.phase === 'lobby' || view.phase === 'gameover') return null;
+  if (view.hurricaneRevealed) {
+    return (
+      <div className="wfx wfx-storm" aria-hidden>
+        <div className="wfx-rain heavy" />
+        <div className="wfx-light" />
+      </div>
+    );
+  }
+  if (view.currentPrecip > 0) {
+    return <div className={`wfx wfx-rain p${Math.min(3, view.currentPrecip)}`} aria-hidden />;
+  }
+  return <div className="wfx wfx-sun" aria-hidden />;
+}
+
+const EV_META: Record<string, { ic: string; cls: string }> = {
+  hurricane: { ic: '🌀', cls: 'storm' },
+  death: { ic: '💀', cls: 'death' },
+  escape: { ic: '🛶', cls: 'escape' },
+  snake: { ic: '🐍', cls: 'snake' },
+  seat: { ic: '🛶', cls: 'seat' },
+};
+
+/** 事件演出：画面フラッシュ＋シェイク＋大きな演出カード。 */
+function EventFX({ view }: { view: PublicGameState }) {
+  const e = [...view.log]
+    .reverse()
+    .find((x) => x.kind === 'death' || x.kind === 'escape' || x.kind === 'snake' || x.text.includes('ハリケーン') || x.text.includes('座席が'));
+  const [cur, setCur] = useState<{ id: number; kind: string; text: string } | null>(null);
+  const seen = useRef(-1);
   useEffect(() => {
-    if (!notable || notable.id === shown) return;
-    setShown(notable.id);
-    setVisible(true);
-    const id = window.setTimeout(() => setVisible(false), 2600);
-    return () => window.clearTimeout(id);
-  }, [notable?.id, shown]);
-  if (!notable || !visible) return null;
-  return <div className={`event-banner ${notable.kind ?? 'info'}`}>{notable.text}</div>;
+    if (!e || e.id === seen.current) return;
+    seen.current = e.id;
+    const kind = e.text.includes('ハリケーン') ? 'hurricane' : e.text.includes('座席が') ? 'seat' : (e.kind ?? 'info');
+    setCur({ id: e.id, kind, text: e.text });
+    if (kind === 'death' || kind === 'snake' || kind === 'hurricane') {
+      document.documentElement.classList.add('fx-shake');
+      window.setTimeout(() => document.documentElement.classList.remove('fx-shake'), 460);
+    }
+    const t = window.setTimeout(() => setCur(null), kind === 'seat' ? 1300 : 2400);
+    return () => window.clearTimeout(t);
+  }, [e?.id]);
+  if (!cur) return null;
+  const meta = EV_META[cur.kind] ?? { ic: '❗', cls: 'info' };
+  return (
+    <>
+      {cur.kind !== 'seat' && <div className={`fx-flash ${meta.cls}`} key={cur.id} />}
+      <div className={`event-card ${meta.cls}`} key={`c${cur.id}`}>
+        <span className="ev-ic">{meta.ic}</span>
+        <span className="ev-text">{cur.text}</span>
+      </div>
+    </>
+  );
 }
 
 function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPlayer; onLeave: () => void }) {
