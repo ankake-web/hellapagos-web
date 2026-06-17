@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
     "@hellapagos/shared": "*",
     "cors": "^2.8.5",
     "express": "^4.21.1",

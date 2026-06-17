@@ -1,7 +1,10 @@
 import type { Server } from 'socket.io';
 import { recordResult } from './leaderboard.js';
+import { botSpeak, llmEnabled, type SpeakCtx } from './llm.js';
 import {
   BOT_PERSONAS,
+  CARD_INFO,
+  PERSONA_INFO,
   MAX_PLAYERS,
   MIN_PLAYERS,
   Rng,
@@ -68,6 +71,11 @@ interface ServerRoom {
   deadlineAt?: number;
   survivalKey?: string; // ラウンド毎の生存ウィンドウ初期化済みマーカー
   voteKey?: string; // 投票ラウンド毎のボット投票・煽り済みマーカー
+  // LLM交渉
+  botVoteIntent: Map<string, string | null>; // botId -> 追放したい playerId
+  negotiateUntil: number; // 交渉ウィンドウ終了 epoch ms
+  negTimer?: ReturnType<typeof setTimeout>;
+  lastReplyAt: number; // 直近のCPU反応返信の時刻
 }
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -104,6 +112,9 @@ export class RoomManager {
       chatSeq: 0,
       botCounter: 0,
       recorded: false,
+      botVoteIntent: new Map(),
+      negotiateUntil: 0,
+      lastReplyAt: 0,
     };
     this.rooms.set(roomId, room);
     this.socketIndex.set(socketId, { roomId, playerId });
@@ -287,9 +298,10 @@ export class RoomManager {
 
       if (aw === 'vote') {
         const key = `vote-${s.round}-${s.voteReason}-${s.pendingEliminations}`;
+        const useLLM = llmEnabled() && this.humanAlive(room);
         if (room.voteKey !== key) {
           room.voteKey = key;
-          this.botTaunt(room);
+          room.botVoteIntent.clear();
           // 狙撃手CPU：弾を持つなら裕福な相手を撃って人数を削る
           for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && x.botPersona === 'sniper')) {
             if (awaiting(room.state) !== 'vote') break;
@@ -305,20 +317,34 @@ export class RoomManager {
             }
           }
           if (awaiting(room.state) !== 'vote') continue;
-          for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && !x.sick)) {
+          room.negotiateUntil = useLLM ? Date.now() + this.negotiationMs(room) : 0;
+          if (useLLM) this.startVoteNegotiation(room, key);
+          else this.botTaunt(room);
+        }
+
+        const past = !useLLM || Date.now() >= room.negotiateUntil;
+        if (past) {
+          // ボットの投票を確定（LLMの意図があれば優先、無ければヒューリスティック）
+          for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && !x.sick && x.vote === undefined)) {
+            const intent = this.intentTarget(room, p.id);
             const r = rngFor(room.state, p.id.charCodeAt(p.id.length - 1));
-            room.state = castVote(room.state, p.id, aiVote(room.state, this.live(room, p.id)!, r));
+            room.state = castVote(room.state, p.id, intent ?? aiVote(room.state, this.live(room, p.id)!, r));
           }
         }
         if (isVoteReady(room.state)) {
           room.state = resolveVote(room.state);
           continue;
         }
-        this.ensureDeadline(room, 'vote', () => {
-          for (const p of alivePlayers(room.state).filter((x) => !x.sick && x.vote === undefined)) {
-            room.state = castVote(room.state, p.id, null);
-          }
-        });
+        if (useLLM && !past) {
+          // 交渉ウィンドウ：締切で再評価（ボット票を確定）。人間はその間に発言・投票できる。
+          this.scheduleRedrive(room, room.negotiateUntil - Date.now());
+        } else {
+          this.ensureDeadline(room, 'vote', () => {
+            for (const p of alivePlayers(room.state).filter((x) => !x.sick && x.vote === undefined)) {
+              room.state = castVote(room.state, p.id, null);
+            }
+          });
+        }
         this.broadcast(room);
         return;
       }
@@ -387,6 +413,116 @@ export class RoomManager {
     }
   }
 
+  // ===== LLMによるCPUの会話・交渉 =====
+  private humanAlive(room: ServerRoom): boolean {
+    return room.state.players.some((p) => !p.isBot && p.alive && !p.escaped && p.connected);
+  }
+  private negotiationMs(room: ServerRoom): number {
+    return room.state.config.speed === 'fast' ? 6000 : room.state.config.speed === 'slow' ? 14000 : 10000;
+  }
+  private intentTarget(room: ServerRoom, botId: string): string | null {
+    const id = room.botVoteIntent.get(botId);
+    if (!id) return null;
+    const t = room.state.players.find((p) => p.id === id);
+    return t && t.alive && !t.escaped && t.id !== botId ? id : null;
+  }
+  private scheduleRedrive(room: ServerRoom, ms: number): void {
+    if (room.negTimer) return;
+    room.negTimer = setTimeout(() => {
+      room.negTimer = undefined;
+      this.drive(room);
+    }, Math.max(300, ms));
+  }
+
+  /** 投票フェイズ：各CPUがLLMで一言（交渉/告発/はったり）を述べ、投票意図を保持する。非同期・失敗時は定型文。 */
+  private startVoteNegotiation(room: ServerRoom, key: string): void {
+    const bots = alivePlayers(room.state).filter((p) => p.isBot && !p.sick);
+    bots.forEach((bot, i) => {
+      const ctx = this.buildCtx(room, bot.id, 'vote');
+      if (!ctx) return;
+      botSpeak(ctx)
+        .then((res) => {
+          if (room.voteKey !== key) return; // 投票が進んでいたら破棄
+          if (!res) {
+            const r = rngFor(room.state, bot.id.charCodeAt(0) + 3);
+            const line = aiChatLine(bot, r);
+            if (line) this.postChat(room, bot.name, line, false);
+            return;
+          }
+          if (res.voteName) {
+            const target = this.matchPlayerByName(room, res.voteName, bot.id);
+            if (target) room.botVoteIntent.set(bot.id, target);
+          }
+          // 少しずらして発言（同時連投を避ける）
+          setTimeout(() => {
+            if (room.voteKey === key && res.say) this.postChat(room, bot.name, res.say, false);
+          }, i * 700);
+        })
+        .catch(() => {});
+    });
+  }
+
+  /** 人間の発言に、生存中のCPU1体がLLMで反応して返信する（クールダウン付き）。 */
+  private maybeBotReply(room: ServerRoom): void {
+    if (!llmEnabled() || !this.humanAlive(room)) return;
+    const phase = room.state.phase;
+    if (phase !== 'action' && phase !== 'vote' && phase !== 'survival') return;
+    if (Date.now() - room.lastReplyAt < 4000) return;
+    const bots = alivePlayers(room.state).filter((p) => p.isBot && !p.sick);
+    if (bots.length === 0) return;
+    room.lastReplyAt = Date.now();
+    const r = rngFor(room.state, room.chatSeq + 1);
+    if (!r.chance(0.8)) return;
+    const bot = r.pick(bots);
+    const ctx = this.buildCtx(room, bot.id, 'reply');
+    if (!ctx) return;
+    botSpeak(ctx)
+      .then((res) => {
+        if (res?.say) this.postChat(room, bot.name, res.say, false);
+      })
+      .catch(() => {});
+  }
+
+  private matchPlayerByName(room: ServerRoom, name: string, exceptId: string): string | null {
+    const norm = (s: string) => s.replace(/\s/g, '').toLowerCase();
+    const n = norm(name);
+    const hit = alivePlayers(room.state).find(
+      (p) => p.id !== exceptId && (norm(p.name) === n || norm(p.name).includes(n) || n.includes(norm(p.name))),
+    );
+    return hit?.id ?? null;
+  }
+
+  private buildCtx(room: ServerRoom, botId: string, situation: 'vote' | 'reply'): SpeakCtx | null {
+    const s = room.state;
+    const me = s.players.find((p) => p.id === botId);
+    if (!me) return null;
+    const persona = me.botPersona ?? 'cooperative';
+    const info = PERSONA_INFO[persona];
+    const handKinds = me.hand.map((c) => CARD_INFO[c.kind].name);
+    const players = alivePlayers(s)
+      .map((p) => `${p.name}(手札${p.hand.length}${p.sick ? '/病' : ''}${p.isBot ? '' : '/人間'})`)
+      .join('、');
+    const candidates = alivePlayers(s)
+      .filter((p) => p.id !== botId)
+      .map((p) => p.name);
+    const recent = room.chat.slice(-8).map((m) => `${m.name}: ${m.text}`).join('\n');
+    return {
+      situation,
+      round: s.round,
+      voteReason: s.voteReason === 'water' ? '水不足' : s.voteReason === 'food' ? '食料不足' : s.voteReason === 'hurricane' ? 'ハリケーン' : undefined,
+      pendingEliminations: s.pendingEliminations,
+      you: me.name,
+      persona: info.label,
+      personaDesc: info.desc,
+      hand: handKinds.length ? handKinds.join('、') : 'なし',
+      sick: me.sick,
+      tracks: `食料${s.food}/水${s.water}/座席${s.raftSeats}（生存${alivePlayers(s).length}人）`,
+      players,
+      candidates,
+      recentChat: recent || '（まだ無し）',
+    };
+  }
+
   private ensureDeadline(room: ServerRoom, phase: string, onFire?: () => void): void {
     if (room.deadline) return;
     const ms = HUMAN_DEADLINE_MS[phase] ?? 30_000;
@@ -405,9 +541,11 @@ export class RoomManager {
   private clearTimers(room: ServerRoom): void {
     if (room.botTimer) clearTimeout(room.botTimer);
     if (room.deadline) clearTimeout(room.deadline);
+    if (room.negTimer) clearTimeout(room.negTimer);
     room.botTimer = undefined;
     room.deadline = undefined;
     room.deadlineAt = undefined;
+    room.negTimer = undefined;
   }
 
   // ===== チャット =====
@@ -417,6 +555,8 @@ export class RoomManager {
     if (!t) return;
     const player = room.state.players.find((p) => p.id === playerId);
     this.postChat(room, player?.name ?? room.spectators.get(playerId) ?? '???', t, !player);
+    // 人間プレイヤーの発言にはCPUが反応して返信する
+    if (player && !player.isBot) this.maybeBotReply(room);
   }
   private postChat(room: ServerRoom, name: string, text: string, isSpectator: boolean): void {
     const msg: ChatMessage = { id: room.chatSeq++, name, text, isSpectator, round: room.state.round };
