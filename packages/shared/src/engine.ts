@@ -249,8 +249,9 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
     case 'fish': {
       const ball = drawBall(rng);
       if (isSnake(ball)) {
+        // 釣りの黒玉は「不漁」。噛まれて病気になるのは木集めのみ。
         d.lastDraw = { playerId, balls: [ball], action };
-        pushLog(d, `${p.name} は釣り：ヘビが出て魚は獲れなかった。`, 'snake', playerId);
+        pushLog(d, `${p.name} は釣り：不漁で1匹も釣れなかった。`, 'bad', playerId);
       } else {
         const gain = ball.fish * (hasPermanent(p, 'fishing_rod') ? 2 : 1);
         d.food = clampSupply(d.food + gain);
@@ -347,13 +348,15 @@ function consumeWater(d: GameState): GameState {
     d.water -= need;
     return consumeFood(d);
   }
-  // 不足
+  // 開始時0：投票なし。該当資源カードを出せた者だけ生存、他は死亡。
   if (d.water === 0) {
-    // 投票なし：全員渇きで死亡（カードは生存ウィンドウで使えた）
-    for (const p of alivePlayers(d)) p.alive = false;
-    pushLog(d, `水が尽き、全員が渇きで倒れた……`, 'death');
-    d.phase = 'gameover';
-    return d;
+    cardOrDie(d, 'water');
+    if (aliveCount(d) <= 0) {
+      pushLog(d, `水が尽き、生存者は全員倒れた……`, 'death');
+      d.phase = 'gameover';
+      return d;
+    }
+    return consumeFood(d);
   }
   const deficit = need - d.water;
   d.water = 0;
@@ -371,10 +374,13 @@ function consumeFood(d: GameState): GameState {
     return endRoundCheck(d);
   }
   if (d.food === 0) {
-    for (const p of alivePlayers(d)) p.alive = false;
-    pushLog(d, `食料が尽き、全員が飢えで倒れた……`, 'death');
-    d.phase = 'gameover';
-    return d;
+    cardOrDie(d, 'food');
+    if (aliveCount(d) <= 0) {
+      pushLog(d, `食料が尽き、生存者は全員倒れた……`, 'death');
+      d.phase = 'gameover';
+      return d;
+    }
+    return endRoundCheck(d);
   }
   const deficit = need - d.food;
   d.food = 0;
@@ -436,10 +442,9 @@ export function resolveVote(s: GameState): GameState {
   if (topped.length === 1) {
     victim = topped[0];
   } else {
-    // 同票/無投票 → 親が裁定
-    const parent = d.players[d.firstPlayerIndex];
+    // 同票/無投票 → 親が裁定（親が脱落していれば右隣の生存者）
+    const parent = d.players[nextAliveIndex(d, d.firstPlayerIndex)];
     const pool = topped.length > 0 ? topped : candidates.filter((p) => p.id !== parent?.id);
-    // 親の票がプール内ならそれ、無ければ「手札が最少」を裁定（決定的）
     if (parent?.vote && pool.some((p) => p.id === parent.vote)) {
       victim = pool.find((p) => p.id === parent.vote);
     } else {
@@ -447,20 +452,21 @@ export function resolveVote(s: GameState): GameState {
     }
   }
   if (!victim) {
-    // 候補なし（全員親など）→ 追放不能。安全側で打ち切り
     d.pendingEliminations = 0;
     return afterVoteBatch(d);
   }
 
-  // 該当資源カードで自己救済（自動）
+  // 該当資源カードで自己救済（自分の配給として消費・プールには入らない）
   const reason = d.voteReason;
   const saveKind = reason === 'water' ? resourceWaterCard(victim) : resourceFoodCard(victim);
   if (saveKind) {
-    applyResourceCard(d, victim, saveKind);
-    pushLog(d, `${victim.name} はカードを切り、追放を免れた。`, 'card', victim.id);
+    consumeCardForSelf(victim, saveKind);
+    pushLog(d, `${victim.name} は${cardName(saveKind)}を切り、追放を免れた。`, 'card', victim.id);
     d.pendingEliminations -= 1;
   } else {
-    eliminate(d, victim, '追放');
+    const votes = victim.votesReceived ?? 0;
+    killPlayer(d, victim);
+    pushLog(d, `${victim.name} は${votes}票を集め、海へ突き落とされた……`, 'death', victim.id);
     d.pendingEliminations -= 1;
   }
 
@@ -527,12 +533,30 @@ function applyResourceCard(d: GameState, p: Player, kind: CardKind): void {
   removeOneCard(p, kind);
 }
 
-/** 脱落処理：手札を両隣へ交互配布（銃も含め場に残す） */
-function eliminate(d: GameState, victim: Player, cause: string): void {
+/** 自己救済：資源カードを自分の配給として消費（プールには入れない）。 */
+function consumeCardForSelf(p: Player, kind: CardKind): void {
+  removeOneCard(p, kind);
+  if (kind === 'dirty_water' || kind === 'rotten_fish') p.sick = true;
+}
+
+/** 資源0で迎えたとき：該当カードを出せた者だけ生存、他は死亡（投票なし）。 */
+function cardOrDie(d: GameState, reason: 'water' | 'food'): void {
+  const label = reason === 'water' ? '渇き' : '飢え';
+  for (const p of alivePlayers(d)) {
+    const k = reason === 'water' ? resourceWaterCard(p) : resourceFoodCard(p);
+    if (k) {
+      consumeCardForSelf(p, k);
+      pushLog(d, `${p.name} は手持ちの${cardName(k)}で${label}をしのいだ。`, 'card', p.id);
+    } else {
+      killPlayer(d, p);
+      pushLog(d, `${p.name} は${label}で倒れた……`, 'death', p.id);
+    }
+  }
+}
+
+/** 脱落処理：手札を両隣へ交互配布（銃も含め場に残す）。ログは呼び出し側。 */
+function killPlayer(d: GameState, victim: Player): void {
   victim.alive = false;
-  const v = (d.players.find((p) => p.id === victim.id) as { votesReceived?: number }).votesReceived ?? 0;
-  pushLog(d, `${victim.name} は${cause}され、島から消えた……（${v}票）`, 'death', victim.id);
-  // 両隣（生存）へ交互配布
   const idx = d.players.indexOf(victim);
   const left = findNeighbor(d, idx, -1);
   const right = findNeighbor(d, idx, +1);

@@ -298,6 +298,7 @@ h1, h2, h3, h4 { margin: 0; }
 .balls { display: flex; gap: 0.45rem; margin-top: 0.5rem; justify-content: center; }
 .ball { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; background: radial-gradient(circle at 34% 28%, #fff, #d9c79a); color: #5a4a18; border: 2px solid #b8a878; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4); animation: ballin 0.34s ease-out both; }
 .ball.snake { background: radial-gradient(circle at 34% 28%, #555, #111); color: #fff; border-color: #000; }
+.ball.miss { background: radial-gradient(circle at 34% 28%, #8a9a9c, #4a585a); color: #d6e2e3; border-color: #5a686a; }
 @keyframes ballin { from { transform: scale(0) rotate(-40deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
 
 .board.w-rain::before, .board.w-storm::before { content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none; }

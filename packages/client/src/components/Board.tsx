@@ -208,19 +208,19 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
     <div className="panel yourturn">
       <h3>あなたの番です — 行動を選ぶ</h3>
       <div className="action-grid">
-        <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}>{ACTION_LABEL.fish}<span className="sub">袋から1玉（魚 or ヘビ）</span></button>
+        <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}>{ACTION_LABEL.fish}<span className="sub">袋から1玉・魚1〜3（不漁あり）</span></button>
         <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}>{ACTION_LABEL.water}<span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
         <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}>{ACTION_LABEL.search}<span className="sub">カードを1枚引く</span></button>
         <div className="btn action wood-action">
           {ACTION_LABEL.wood}
-          <span className="sub">+1（斧で+2）＋追加引き</span>
+          <span className="sub">まず木1本（斧で2本）確定</span>
           <div className="wood-push">
-            <label>追加 {wood}個 <input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
-            <button className="btn primary small" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>木を集める{wood > 0 ? `（+${wood}）` : ''}</button>
+            <label>さらに引く本数：{wood} 本（0〜5）<input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
+            <button className="btn primary small" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>{wood > 0 ? `確定：1本＋${wood}本引く` : '確定：木1本だけ取る'}</button>
           </div>
         </div>
       </div>
-      <p className="hint">追加引きは黒玉(ヘビ)が出ると病気＝次ラウンド休み。リスクと相談。</p>
+      <p className="hint">🐍ヘビ（黒玉）に噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると病気で次ラウンド休み＆追加分は無し。釣りの黒玉は「不漁」で病気にはなりません。</p>
     </div>
   );
 }
@@ -393,11 +393,15 @@ function DrawResult({ view }: { view: PublicGameState }) {
     <div className="draw-pop">
       <span className="draw-who">{who} の{d.action === 'fish' ? '釣り' : '木集め'}</span>
       <div className="balls">
-        {d.balls.map((b, i) => (
-          <span key={i} className={`ball ${'snake' in b ? 'snake' : ''}`} style={{ animationDelay: `${i * 0.12}s` }}>
-            {'snake' in b ? '🐍' : (b as { fish: number }).fish}
-          </span>
-        ))}
+        {d.balls.map((b, i) => {
+          const snake = 'snake' in b;
+          // 木集めの黒玉＝ヘビに噛まれる。釣りの黒玉＝不漁（病気なし）。
+          const cls = snake ? (d.action === 'wood' ? 'snake' : 'miss') : '';
+          const label = snake ? (d.action === 'wood' ? '🐍' : '✗') : (b as { fish: number }).fish;
+          return (
+            <span key={i} className={`ball ${cls}`} style={{ animationDelay: `${i * 0.12}s` }}>{label}</span>
+          );
+        })}
       </div>
     </div>
   );
