@@ -26,8 +26,16 @@
   --glass: rgba(11, 36, 44, 0.55);
   --glass-2: rgba(20, 54, 64, 0.62);
   --glass-3: rgba(28, 70, 82, 0.66);
+  /* 上面に光沢を足すガラスのシーン（パネル背景に重ねる） */
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 42%);
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3);
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.55);
+  --r-sm: 10px;
+  --r-md: 14px;
   --radius: 18px;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --font: 'Hiragino Maru Gothic ProN', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, system-ui, sans-serif;
 }
 
@@ -39,6 +47,11 @@ body {
   color: var(--ink);
   background: linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 38%, var(--ocean) 60%, var(--ocean-deep) 100%);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* 和文を詰めて読みやすく */
+  font-feature-settings: 'palt' 1;
+  letter-spacing: 0.012em;
+  line-height: 1.5;
 }
 .app { min-height: 100vh; position: relative; }
 button { font-family: inherit; cursor: pointer; }
@@ -46,6 +59,19 @@ h1, h2, h3, h4 { margin: 0; }
 
 /* ===== 背景（空・太陽・波） ===== */
 .backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+/* 紙の粒状感：平坦なグラデに質感を足し、水彩アセットと馴染ませる */
+.backdrop::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+  opacity: 0.38;
+  mix-blend-mode: soft-light;
+}
+/* 周辺減光：中央へ視線を集める */
+.backdrop::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: radial-gradient(125% 95% at 50% 30%, transparent 50%, rgba(2, 12, 16, 0.42) 100%);
+}
 .bd-sky {
   position: absolute; inset: 0;
   background: linear-gradient(180deg, #11314a 0%, #1c5167 30%, #2b7d7a 52%, #0e3a47 70%, #07232b 100%);
@@ -94,15 +120,22 @@ h1, h2, h3, h4 { margin: 0; }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.06); }
 .btn.ghost { background: rgba(255, 255, 255, 0.04); box-shadow: none; }
 .btn.small { padding: 0.34rem 0.66rem; font-size: 0.8rem; }
+/* キーボード操作のフォーカス可視化（アクセシビリティ） */
+.btn:focus-visible, .right-tabs button:focus-visible, .menu-item:focus-visible,
+.quick-chip:focus-visible, .card-chip:focus-visible, .mute-btn:focus-visible, .menu-btn:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px rgba(255, 190, 90, 0.5), var(--shadow-sm);
+}
+/* 数字は等幅で桁ブレを防ぐ */
+.track-head strong, .timer, .room-code strong, .votes, .ds-day, .day { font-variant-numeric: tabular-nums; }
 
 /* ===== ガラス・パネル共通 ===== */
 .home-card, .lobby-card, .panel, .track, .pcard, .hand, .log, .chat, .result, .modal {
-  background: var(--glass-2);
+  background: var(--sheen), var(--glass-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  backdrop-filter: blur(12px) saturate(1.1);
-  -webkit-backdrop-filter: blur(12px) saturate(1.1);
-  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(13px) saturate(1.15);
+  -webkit-backdrop-filter: blur(13px) saturate(1.15);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 /* ===== Home ===== */
@@ -187,6 +220,10 @@ h1, h2, h3, h4 { margin: 0; }
 .track-head strong.ok { color: var(--good); }
 .track-head strong.short { color: var(--danger); }
 .raft .track-head strong.ok { color: var(--sand); }
+.gauge { height: 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.32); border: 1px solid var(--line); margin: 0.5rem 0 0.3rem; overflow: hidden; }
+.gauge-fill { height: 100%; border-radius: 999px; transition: width 0.55s var(--ease-out); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.gauge-fill.ok { background: linear-gradient(90deg, var(--good-2), var(--good)); }
+.gauge-fill.short { background: linear-gradient(90deg, var(--sun-2), var(--danger)); }
 .raft-bar { display: flex; gap: 4px; margin-top: 0.5rem; }
 .raft-bar .plank { flex: 1; height: 14px; border-radius: 3px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--line); position: relative; }
 .raft-bar .plank.on { background: linear-gradient(180deg, var(--sand) 0%, var(--wood) 130%); border-color: var(--sand-2); box-shadow: 0 0 8px rgba(233, 216, 166, 0.4); }

@@ -202,13 +202,17 @@ function Tracks({ view }: { view: PublicGameState }) {
 }
 function Track({ icon, label, value, need, cap, flyKey }: { icon: string; label: string; value: number; need: number; cap: number; flyKey?: string }) {
   const short = value < need;
+  const pct = Math.max(0, Math.min(100, (value / Math.max(need, 1)) * 100));
   return (
     <div className="track" data-fly={flyKey}>
       <div className="track-head">
         <span>{icon} {label}</span>
         <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}<small> / 必要{need}</small></strong>
       </div>
-      <div className="hint-sm">上限{cap}</div>
+      <div className="gauge" title={`${value} / 必要${need}（上限${cap}）`}>
+        <div className={`gauge-fill ${short ? 'short' : 'ok'}`} style={{ width: `${pct}%` }} />
+      </div>
+      <div className="hint-sm">{short ? `あと${need - value}不足` : '充足'}・上限{cap}</div>
     </div>
   );
 }
