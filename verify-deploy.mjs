@@ -89,17 +89,20 @@ async function checkGameE2E() {
       await page.getByRole('button', { name: /AIボットを追加/ }).click();
       await wait(200);
     }
+    // CPU演出を速くして検証時間を短縮
+    await page.locator('.config-row select').nth(1).selectOption('fast').catch(() => {});
+    await wait(200);
     await page.getByRole('button', { name: /ゲーム開始/ }).click();
     await page.waitForSelector('.board', { timeout: 15_000 });
     ok('ゲーム開始（盤面表示）', true);
 
     let over = false;
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 240; i++) {
       if ((await step(page)) === 'over') {
         over = true;
         break;
       }
-      await wait(260);
+      await wait(500);
     }
     ok('ゲーム終了まで進行', over);
     await page.screenshot({ path: '/tmp/deploy-verify.png' });

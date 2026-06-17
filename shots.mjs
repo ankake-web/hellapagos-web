@@ -1,89 +1,64 @@
+// 新UIの統合確認：ホスト＋ボット3で1ゲームを通し、要所をスクショ。
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const BASE = process.env.BASE ?? 'http://localhost:5174';
-const OUT = '/tmp/shots';
+const OUT = '/tmp/shots2';
 mkdirSync(OUT, { recursive: true });
-
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function phaseName(page) {
-  const el = page.locator('.phase-name');
-  return (await el.count()) ? (await el.first().innerText().catch(() => '')) : '';
-}
-
-async function step(page) {
-  if (await page.locator('.result').count()) return 'over';
-  const tryClick = async (sel) => {
-    const el = page.locator(sel).first();
-    if ((await el.count()) && (await el.isVisible().catch(() => false))) {
-      await el.click().catch(() => {});
-      return true;
-    }
-    return false;
-  };
-  if (await tryClick('.action-grid .btn.action')) return 'acted';
-  if (await tryClick('.panel .panel-actions .btn.primary')) return 'contrib';
-  if (await tryClick('.vote-grid .btn.vote')) return 'voted';
-  if (await tryClick('.panel.escape .btn.primary')) return 'escaped';
-  return 'wait';
-}
-
-async function run(label, viewport) {
-  const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport });
-  const shot = (name) => page.screenshot({ path: `${OUT}/${label}-${name}.png`, fullPage: false });
-
-  await page.goto(BASE, { waitUntil: 'networkidle' });
-  await wait(400);
-  await shot('1-home');
-
-  // ルール
-  await page.getByRole('button', { name: /遊び方/ }).click();
-  await wait(300);
-  await shot('2-rules');
-  await page.getByRole('button', { name: /わかった|閉じる/ }).first().click();
-  await wait(200);
-
-  // ルーム作成
-  await page.locator('.field input').first().fill('プレイヤー');
-  await page.getByRole('button', { name: 'ルームを作る' }).click();
-  await page.waitForSelector('.lobby-card', { timeout: 5000 });
-  await wait(300);
-
-  // ボット追加
-  for (let i = 0; i < 3; i++) {
-    await page.getByRole('button', { name: /AIボットを追加/ }).click();
-    await wait(150);
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 880 } });
+const shot = (n) => page.screenshot({ path: `${OUT}/${n}.png` });
+const has = async (sel) => (await page.locator(sel).count()) > 0;
+const clickIf = async (sel) => {
+  const el = page.locator(sel).first();
+  if ((await el.count()) && (await el.isVisible().catch(() => false)) && (await el.isEnabled().catch(() => false))) {
+    await el.click().catch(() => {});
+    return true;
   }
-  await shot('3-lobby');
+  return false;
+};
 
-  // 開始
-  await page.getByRole('button', { name: /ゲーム開始/ }).click();
-  await page.waitForSelector('.board', { timeout: 5000 });
-  await wait(700);
-  await shot('4-board-action');
+await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+await page.waitForSelector('.home-card', { timeout: 30000 });
+await shot('1-home');
 
-  // 何ラウンドか進めて、投票・結果も撮る
-  let captured = { vote: false };
-  for (let i = 0; i < 60; i++) {
-    const ph = await phaseName(page);
-    if (ph.includes('投票') && !captured.vote) {
-      captured.vote = true;
-      await wait(250);
-      await shot('5-board-vote');
-    }
-    const r = await step(page);
-    if (r === 'over') break;
-    await wait(280);
-  }
-  await wait(400);
-  if (await page.locator('.result').count()) await shot('6-result');
-
-  await browser.close();
-  console.log(`[${label}] done`);
+await page.locator('.field input').first().fill('プレイヤー');
+await page.getByRole('button', { name: 'ルームを作る' }).click();
+await page.waitForSelector('.lobby-card', { timeout: 10000 });
+for (let i = 0; i < 3; i++) {
+  await page.getByRole('button', { name: /AIボットを追加/ }).click();
+  await wait(120);
 }
+await page.locator('.config-row select').nth(1).selectOption('fast').catch(() => {});
+await wait(200);
+await shot('2-lobby');
 
-await run('pc', { width: 1280, height: 820 });
-await run('mobile', { width: 390, height: 844 });
-console.log('ALL DONE ->', OUT);
+await page.getByRole('button', { name: /ゲーム開始/ }).click();
+await page.waitForSelector('.board', { timeout: 10000 });
+
+let actionShot = false, voteShot = false, drawShot = false, escapeShot = false;
+for (let i = 0; i < 240; i++) {
+  if (await has('.result')) break;
+  if (!drawShot && (await has('.draw-pop'))) { drawShot = true; await shot('5-draw'); }
+  if (!actionShot && (await has('.panel.yourturn'))) { actionShot = true; await shot('3-action'); }
+  if (!voteShot && (await has('.vote-grid'))) { voteShot = true; await shot('6-vote'); }
+  if (!escapeShot && (await has('.panel.escape'))) { escapeShot = true; await shot('7-escape'); }
+
+  // 自分の操作
+  if (await has('.panel.yourturn')) {
+    await clickIf('.panel.yourturn .action-grid button.btn.action'); // 釣り（先頭）
+  } else if (await has('.panel') && (await page.getByRole('button', { name: /確定（これで消費へ）/ }).count())) {
+    await clickIf('.panel .panel-actions button.btn.primary');
+  } else if (await has('.vote-grid')) {
+    await clickIf('.vote-grid button.vote');
+  } else if (await has('.panel.escape')) {
+    await clickIf('.panel.escape .panel-actions button.btn.primary');
+  }
+  await wait(450);
+}
+await wait(600);
+if (await has('.result')) await shot('8-result');
+console.log('shots done ->', OUT, { actionShot, voteShot, drawShot, escapeShot });
+await browser.close();
