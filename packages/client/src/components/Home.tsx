@@ -21,6 +21,7 @@ export function Home({ onCreate, onJoin, stats }: Props) {
   const [showRules, setShowRules] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
   const trimmed = name.trim();
+  const room = roomId.toUpperCase();
 
   return (
     <div className="home">
@@ -95,13 +96,19 @@ export function Home({ onCreate, onJoin, stats }: Props) {
             value={roomId}
             maxLength={4}
             placeholder="ABCD"
-            onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+            className="roomid-input"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            inputMode="text"
+            onChange={(e) => setRoomId(e.target.value)}
           />
         </label>
         <button
           className="btn"
-          disabled={!trimmed || roomId.length < 4}
-          onClick={() => onJoin(roomId, trimmed)}
+          disabled={!trimmed || room.length < 4}
+          onClick={() => onJoin(room, trimmed)}
         >
           ルームに参加
         </button>

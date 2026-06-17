@@ -144,7 +144,7 @@ export const CARD_INFO: Record<CardKind, { icon: string; name: string; desc: str
   axe: { icon: '🪓', name: '斧', desc: '木集め+1（永続）', cat: 'permanent' },
   crystal_ball: { icon: '🔮', name: '水晶玉', desc: '各投票で最後に投票（永続）', cat: 'permanent' },
   gun: { icon: '🔫', name: '銃', desc: '弾があれば他者を排除（永続・脱落でも回収）', cat: 'permanent' },
-  bullet: { icon: '🔩', name: '弾', desc: '銃と併用・使用後失う', cat: 'permanent' },
+  bullet: { icon: '💥', name: '弾', desc: '銃と併用・使用後失う', cat: 'permanent' },
   junk: { icon: '🗑️', name: '無用品', desc: '効果なし（ブラフ用）', cat: 'junk' },
 };
 

@@ -530,7 +530,11 @@ function WeatherFX({ view }: { view: PublicGameState }) {
     );
   }
   if (view.currentPrecip > 0) {
-    return <div className={`wfx wfx-rain p${Math.min(3, view.currentPrecip)}`} aria-hidden />;
+    return (
+      <div className="wfx" aria-hidden>
+        <div className={`wfx-rain p${Math.min(3, view.currentPrecip)}`} />
+      </div>
+    );
   }
   return <div className="wfx wfx-sun" aria-hidden />;
 }
