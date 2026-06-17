@@ -13,7 +13,8 @@ export const api = {
   rejoin: (roomId: string, playerId: string) => new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId }, r)),
   addBot: () => socket.emit('room:addBot'),
   removeBot: (botId: string) => socket.emit('room:removeBot', { botId }),
-  setConfig: (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed }) => socket.emit('game:setConfig', p),
+  setConfig: (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) =>
+    socket.emit('game:setConfig', p),
   start: () => socket.emit('game:start'),
   choose: (action: ActionType, woodPush = 0) => socket.emit('action:choose', { action, woodPush }),
   playCard: (cardId: string, targetId?: string | null) => socket.emit('card:play', { cardId, targetId }),

@@ -78,6 +78,8 @@ export interface GameConfig {
   soleSurvivor: boolean;
   difficulty: Difficulty;
   speed: Speed;
+  /** 人間の手番の制限時間（秒）。0 = 無制限 */
+  timeLimit: number;
   seed: number;
 }
 
@@ -215,7 +217,7 @@ export interface ClientToServerEvents {
   'room:rejoin': (p: { roomId: string; playerId: string }, cb: (res: Ack) => void) => void;
   'room:addBot': () => void;
   'room:removeBot': (p: { botId: string }) => void;
-  'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed }) => void;
+  'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) => void;
   'game:start': () => void;
   'action:choose': (p: { action: ActionType; woodPush?: number }) => void;
   'card:play': (p: { cardId: string; targetId?: string | null }) => void;

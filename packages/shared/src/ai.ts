@@ -107,3 +107,47 @@ const CHAT_LINES: Record<BotPersona, string[]> = {
 export function aiChatLine(p: Player, rng: Rng): string | null {
   return rng.chance(0.55) ? rng.pick(CHAT_LINES[persona(p)]) : null;
 }
+
+/**
+ * 無料（APIキー無し）でも交渉感を出すための、状況依存スクリプトのセリフ＋投票意図。
+ * 手札・性格・脅し（銃）・取引・なすりつけ・強行を、相手の名前を入れて述べる。
+ */
+export function scriptedNegotiation(
+  s: GameState,
+  me: Player,
+  rng: Rng,
+): { say: string; voteId: string | null } {
+  const others = s.players.filter((p) => p.alive && !p.escaped && p.id !== me.id);
+  if (others.length === 0) return { say: '…', voteId: null };
+  const per = persona(me);
+  const rich = [...others].sort((a, b) => b.hand.length - a.hand.length)[0];
+  const poor = [...others].sort((a, b) => a.hand.length - b.hand.length)[0];
+  const armed = me.hand.some((c) => c.kind === 'gun') && me.hand.some((c) => c.kind === 'bullet');
+  const target = per === 'sniper' || per === 'hoarder' ? rich : poor;
+
+  const lines: string[] = [];
+  if (armed) {
+    lines.push(`弾は込めてある。${rich.name}、妙な真似はするなよ。`);
+    lines.push(`いざとなれば撃つ。${rich.name}が一番あやしい。`);
+  }
+  switch (per) {
+    case 'cooperative':
+      lines.push(`${target.name}、ほとんど何も出してないだろ？`, `公平にいこう。${target.name}が抜けるべきだ。`, `${poor.name}、水を出すなら庇うよ。`);
+      break;
+    case 'hoarder':
+      lines.push(`私は出した方だ、${rich.name}こそ溜め込んでる。`, `疑うなら${rich.name}を調べろよ。`, `なんで僕なんだ、${target.name}だろ普通。`);
+      break;
+    case 'sniper':
+      lines.push(`${rich.name}、手札を抱えすぎだ。消えてもらう。`, `誰が邪魔か、もう分かってる。${rich.name}だ。`, `俺は${rich.name}に入れる。文句あるか？`);
+      break;
+    case 'coward':
+      lines.push(`お、俺じゃない！${target.name}が怪しい！`, `みんなが${target.name}なら、俺もそれでいい…`, `頼む、${poor.name}…君が出してくれよ。`);
+      break;
+  }
+  // たまに取引・強行
+  if (rng.chance(0.3)) lines.push(`${poor.name}、次は譲る。今回は${target.name}でいこう。`);
+  if (rng.chance(0.2)) lines.push(`みんなが何と言おうと、俺は${target.name}に入れる。`);
+
+  const voteId = rng.chance(per === 'coward' ? 0.5 : 0.8) ? target.id : null;
+  return { say: rng.pick(lines), voteId };
+}

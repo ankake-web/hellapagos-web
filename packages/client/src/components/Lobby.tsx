@@ -86,6 +86,15 @@ export function Lobby({ view, onLeave }: Props) {
               <option value="fast">速い</option>
             </select>
           </label>
+          <label>
+            手番の制限時間
+            <select disabled={!isHost} value={String(view.config.timeLimit)} onChange={(e) => api.setConfig({ timeLimit: Number(e.target.value) })}>
+              <option value="0">なし</option>
+              <option value="60">1分</option>
+              <option value="120">2分</option>
+              <option value="180">3分</option>
+            </select>
+          </label>
         </div>
 
         <div className="lobby-actions">

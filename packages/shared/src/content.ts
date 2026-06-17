@@ -11,8 +11,21 @@ export const DEFAULT_CONFIG: GameConfig = {
   soleSurvivor: false,
   difficulty: 'normal',
   speed: 'normal',
+  timeLimit: 120, // 既定2分。初心者向け。0で無制限
   seed: 1,
 };
+
+/** CPU/プレイヤーの名前候補（漂流者っぽい呼び名）。ランダムに割り当てる。 */
+export const NAME_POOL: readonly string[] = [
+  'カイ', 'ナギ', 'ソラ', 'ハル', 'ミオ', 'レン', 'ツバサ', 'コハク', 'シノ', 'リク',
+  'アサヒ', 'ユウ', 'ナミ', 'ホノ', 'イオ', 'クレハ', 'トウヤ', 'セナ', 'マレ', 'シオ',
+  'ヒナタ', 'カナタ', 'アオイ', 'リョウ', 'ノゾミ', 'ハヤテ', 'スイ', 'ルカ',
+];
+export function randomName(rng: Rng, used: ReadonlySet<string> = new Set()): string {
+  const avail = NAME_POOL.filter((n) => !used.has(n));
+  const pool = avail.length ? avail : NAME_POOL;
+  return rng.pick(pool);
+}
 
 // ===== 木玉の袋（白5: 魚 1,1,2,2,3 / 黒1: ヘビ）。毎回戻すので確率不変 =====
 export type Ball = { fish: number } | { snake: true };
@@ -156,14 +169,14 @@ export function difficultyParams(d: Difficulty): { risk: number; selfish: number
   }
 }
 
-/** CPUの「考え中」待ち時間レンジ(ms) */
+/** CPUの「考え中」待ち時間レンジ(ms)。何が起きたか追えるよう、ゆとりを持たせる。 */
 export function thinkDelayRange(speed: GameConfig['speed']): [number, number] {
   switch (speed) {
     case 'slow':
-      return [1200, 2400];
+      return [2000, 3400];
     case 'fast':
-      return [250, 600];
+      return [600, 1200];
     default:
-      return [800, 1800];
+      return [1300, 2400];
   }
 }

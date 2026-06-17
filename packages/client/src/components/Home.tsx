@@ -1,7 +1,12 @@
 import { useState } from 'react';
+import { NAME_POOL } from '@hellapagos/shared';
 import type { Stats } from '../stats.js';
 import { Rules } from './Rules.js';
 import { Leaderboard } from './Leaderboard.js';
+
+function suggestName(): string {
+  return NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)];
+}
 
 interface Props {
   onCreate: (name: string) => void;
@@ -11,7 +16,7 @@ interface Props {
 
 export function Home({ onCreate, onJoin, stats }: Props) {
   const urlRoom = new URLSearchParams(window.location.search).get('room') ?? '';
-  const [name, setName] = useState('');
+  const [name, setName] = useState(suggestName);
   const [roomId, setRoomId] = useState(urlRoom.toUpperCase());
   const [showRules, setShowRules] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
@@ -65,12 +70,17 @@ export function Home({ onCreate, onJoin, stats }: Props) {
 
         <label className="field">
           <span>あなたの名前</span>
-          <input
-            value={name}
-            maxLength={16}
-            placeholder="名無し"
-            onChange={(e) => setName(e.target.value)}
-          />
+          <div className="name-row">
+            <input
+              value={name}
+              maxLength={16}
+              placeholder="名無し"
+              onChange={(e) => setName(e.target.value)}
+            />
+            <button type="button" className="btn ghost small" title="ランダムな名前" onClick={() => setName(suggestName())}>
+              🎲
+            </button>
+          </div>
         </label>
 
         <button className="btn primary" disabled={!trimmed} onClick={() => onCreate(trimmed)}>

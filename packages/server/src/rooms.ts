@@ -15,6 +15,8 @@ import {
   aiSurvivalPlays,
   aiVote,
   alivePlayers,
+  randomName,
+  scriptedNegotiation,
   awaiting,
   castVote,
   createGame,
@@ -46,14 +48,7 @@ import {
   type Speed,
 } from '@hellapagos/shared';
 
-const HUMAN_DEADLINE_MS: Record<string, number> = {
-  action: 60_000,
-  survival: 18_000,
-  vote: 30_000,
-  escape: 20_000,
-};
 const CHAT_HISTORY = 60;
-const BOT_NAMES = ['CPUアカ', 'CPUアオ', 'CPUミドリ', 'CPUキイロ', 'CPUモモ', 'CPUクロ', 'CPUシロ', 'CPUムラサキ', 'CPUハイ', 'CPUチャ'];
 
 interface ServerRoom {
   id: string;
@@ -160,7 +155,10 @@ export class RoomManager {
     const { room, playerId } = this.ctx(socketId);
     this.assertHost(room, playerId);
     if (room.state.phase !== 'lobby' || room.state.players.length >= MAX_PLAYERS) return;
-    const name = BOT_NAMES[room.botCounter % BOT_NAMES.length] + (room.botCounter >= BOT_NAMES.length ? `${Math.floor(room.botCounter / BOT_NAMES.length) + 1}` : '');
+    const seedArr = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(seedArr);
+    const used = new Set(room.state.players.map((p) => p.name));
+    const name = randomName(new Rng(seedArr[0] || 1), used);
     const persona = BOT_PERSONAS[room.botCounter % BOT_PERSONAS.length] as BotPersona;
     room.botCounter++;
     room.state = addPlayer(room.state, { id: 'bot_' + genId(6), name, isBot: true, botPersona: persona });
@@ -174,7 +172,7 @@ export class RoomManager {
       this.broadcast(room);
     }
   }
-  setRoomConfig(socketId: string, p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed }): void {
+  setRoomConfig(socketId: string, p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }): void {
     const { room, playerId } = this.ctx(socketId);
     this.assertHost(room, playerId);
     room.state = setConfig(room.state, p);
@@ -298,7 +296,7 @@ export class RoomManager {
 
       if (aw === 'vote') {
         const key = `vote-${s.round}-${s.voteReason}-${s.pendingEliminations}`;
-        const useLLM = llmEnabled() && this.humanAlive(room);
+        const useNeg = this.humanAlive(room); // 人間がいれば交渉ウィンドウ（LLM/スクリプト両対応）
         if (room.voteKey !== key) {
           room.voteKey = key;
           room.botVoteIntent.clear();
@@ -317,12 +315,11 @@ export class RoomManager {
             }
           }
           if (awaiting(room.state) !== 'vote') continue;
-          room.negotiateUntil = useLLM ? Date.now() + this.negotiationMs(room) : 0;
-          if (useLLM) this.startVoteNegotiation(room, key);
-          else this.botTaunt(room);
+          room.negotiateUntil = useNeg ? Date.now() + this.negotiationMs(room) : 0;
+          if (useNeg) this.startVoteNegotiation(room, key);
         }
 
-        const past = !useLLM || Date.now() >= room.negotiateUntil;
+        const past = !useNeg || Date.now() >= room.negotiateUntil;
         if (past) {
           // ボットの投票を確定（LLMの意図があれば優先、無ければヒューリスティック）
           for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && !x.sick && x.vote === undefined)) {
@@ -335,7 +332,7 @@ export class RoomManager {
           room.state = resolveVote(room.state);
           continue;
         }
-        if (useLLM && !past) {
+        if (useNeg && !past) {
           // 交渉ウィンドウ：締切で再評価（ボット票を確定）。人間はその間に発言・投票できる。
           this.scheduleRedrive(room, room.negotiateUntil - Date.now());
         } else {
@@ -434,31 +431,42 @@ export class RoomManager {
     }, Math.max(300, ms));
   }
 
-  /** 投票フェイズ：各CPUがLLMで一言（交渉/告発/はったり）を述べ、投票意図を保持する。非同期・失敗時は定型文。 */
+  /** 投票フェイズ：各CPUが一言（交渉/告発/はったり）を述べ、投票意図を保持する。
+   *  APIキーがあれば LLM、無ければ文脈付きスクリプトでフォールバック。 */
   private startVoteNegotiation(room: ServerRoom, key: string): void {
     const bots = alivePlayers(room.state).filter((p) => p.isBot && !p.sick);
+    const useLLM = llmEnabled();
     bots.forEach((bot, i) => {
+      const post = (say: string) => {
+        setTimeout(() => {
+          if (room.voteKey === key && say) this.postChat(room, bot.name, say, false);
+        }, i * 750);
+      };
+      const scripted = () => {
+        const cur = this.live(room, bot.id);
+        if (!cur) return;
+        const r = rngFor(room.state, bot.id.charCodeAt(0) + 5 + i);
+        const { say, voteId } = scriptedNegotiation(room.state, cur, r);
+        if (voteId) room.botVoteIntent.set(bot.id, voteId);
+        post(say);
+      };
+      if (!useLLM) {
+        scripted();
+        return;
+      }
       const ctx = this.buildCtx(room, bot.id, 'vote');
-      if (!ctx) return;
+      if (!ctx) return scripted();
       botSpeak(ctx)
         .then((res) => {
-          if (room.voteKey !== key) return; // 投票が進んでいたら破棄
-          if (!res) {
-            const r = rngFor(room.state, bot.id.charCodeAt(0) + 3);
-            const line = aiChatLine(bot, r);
-            if (line) this.postChat(room, bot.name, line, false);
-            return;
-          }
+          if (room.voteKey !== key) return;
+          if (!res) return scripted();
           if (res.voteName) {
             const target = this.matchPlayerByName(room, res.voteName, bot.id);
             if (target) room.botVoteIntent.set(bot.id, target);
           }
-          // 少しずらして発言（同時連投を避ける）
-          setTimeout(() => {
-            if (room.voteKey === key && res.say) this.postChat(room, bot.name, res.say, false);
-          }, i * 700);
+          post(res.say);
         })
-        .catch(() => {});
+        .catch(() => scripted());
     });
   }
 
@@ -525,7 +533,12 @@ export class RoomManager {
 
   private ensureDeadline(room: ServerRoom, phase: string, onFire?: () => void): void {
     if (room.deadline) return;
-    const ms = HUMAN_DEADLINE_MS[phase] ?? 30_000;
+    const limit = room.state.config.timeLimit;
+    if (!limit || limit <= 0) {
+      room.deadlineAt = undefined; // 無制限：締切なし（人間が好きなだけ考えられる）
+      return;
+    }
+    const ms = limit * 1000;
     room.deadlineAt = Date.now() + ms;
     room.deadline = setTimeout(() => {
       room.deadline = undefined;

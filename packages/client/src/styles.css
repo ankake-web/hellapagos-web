@@ -412,3 +412,41 @@ html.fx-shake .board { animation: shake 0.46s ease-in-out; }
 @media (prefers-reduced-motion: reduce) {
   .wv, .bd-sun, .storm.urgent { animation: none; }
 }
+
+/* ===== フィードバック対応の追加スタイル ===== */
+/* 袋引きの合計表示・カード上の小さい玉 */
+.draw-sum { display: block; margin-top: 0.45rem; font-weight: 800; color: var(--sand); }
+.balls.small { gap: 3px; margin: 0.25rem 0; }
+.balls.small .ball { width: 22px; height: 22px; font-size: 0.78rem; border-width: 1.5px; }
+
+/* 名前入力＋サイコロ */
+.name-row { display: flex; gap: 0.4rem; align-items: stretch; }
+.name-row input { flex: 1; }
+.name-row .btn { flex-shrink: 0; }
+
+/* アイテム説明モーダル */
+.item-modal { width: min(380px, 100%); text-align: center; }
+.item-modal .item-ic {
+  font-size: 3rem; width: 84px; height: 84px; margin: 0 auto 0.4rem; border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #213d47, #15303a); border: 1px solid var(--line-strong); border-top-width: 4px;
+}
+.item-modal .item-ic.cat-resource { border-top-color: var(--good); }
+.item-modal .item-ic.cat-permanent { border-top-color: var(--sand); }
+.item-modal .item-ic.cat-single { border-top-color: var(--escape); }
+.item-modal .item-ic.cat-junk { border-top-color: #6b7a7c; }
+.item-modal h3 { font-size: 1.3rem; margin-bottom: 0.3rem; }
+.item-modal .item-desc { font-size: 1rem; line-height: 1.6; }
+.item-modal .panel-actions { justify-content: center; margin-top: 1rem; }
+
+/* チャット定型文＋宛先 */
+.quick-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
+.quick-to {
+  padding: 0.28rem 0.4rem; border-radius: 8px; border: 1px solid var(--line-strong);
+  background: rgba(0,0,0,0.28); color: var(--ink); font-family: inherit; font-size: 0.76rem;
+}
+.quick-chip {
+  padding: 0.28rem 0.55rem; border-radius: 999px; border: 1px solid var(--line-strong);
+  background: rgba(255,255,255,0.06); color: var(--ink); font-size: 0.78rem; font-family: inherit;
+}
+.quick-chip:hover { background: rgba(255,255,255,0.14); }
