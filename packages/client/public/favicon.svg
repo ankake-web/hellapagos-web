@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="ヘルパゴス">
+  <defs>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1d6e84"/>
+      <stop offset="100%" stop-color="#0a2e39"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#s)"/>
+  <circle cx="46" cy="20" r="9" fill="#ffce6a"/>
+  <ellipse cx="26" cy="42" rx="18" ry="6" fill="#d9be84"/>
+  <path d="M26 42 q-2 -14 -8 -18 q10 3 8 18" fill="#4fa06c"/>
+  <rect x="24" y="24" width="3" height="18" rx="1.5" fill="#7c4f2e"/>
+  <g transform="translate(36 46)">
+    <rect x="0" y="0" width="20" height="5" rx="2" fill="#7c4f2e"/>
+    <rect x="8" y="-12" width="2.5" height="12" fill="#9c6b3e"/>
+    <path d="M10.5 -12 L20 -6 L10.5 -3 Z" fill="#eae0cf"/>
+  </g>
+</svg>

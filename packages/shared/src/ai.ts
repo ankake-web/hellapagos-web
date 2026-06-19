@@ -1,5 +1,5 @@
 import { difficultyParams } from './content.js';
-import { aliveCount, hasPermanent } from './engine.js';
+import { aliveCount, alivePlayers, hasPermanent } from './engine.js';
 import { Rng } from './rng.js';
 import type { ActionType, BotPersona, Difficulty, GameState, Player } from './types.js';
 
@@ -52,26 +52,47 @@ export function aiAction(s: GameState, p: Player, rng: Rng): { action: ActionTyp
 /** 生存ウィンドウで供出するカードid列（協力寄り/終盤は出し惜しみ） */
 export function aiSurvivalPlays(s: GameState, p: Player): string[] {
   const need = aliveCount(s);
-  let waterDeficit = Math.max(0, need - s.water);
-  let foodDeficit = Math.max(0, need - s.food);
+  const waterDeficit = Math.max(0, need - s.water);
+  const foodDeficit = Math.max(0, need - s.food);
+  if (waterDeficit === 0 && foodDeficit === 0) return [];
   const per = persona(p);
   const { selfish } = difficultyParams(diff(p, s));
   const late = lateGame(s);
-  // 溜め込み屋＆終盤の自己中は出さない（投票で詰むまで温存）
-  const willShare = per === 'cooperative' || per === 'coward' || (!late && selfish < 0.6);
+  const desperate = per === 'cooperative' || per === 'coward';
+
+  // 自分のクリーン資源で不足を埋められるか見積もる
+  const myWater = p.hand.filter((c) => c.kind === 'water_bottle').length;
+  const myFood = p.hand.reduce((n, c) => n + (c.kind === 'sardine_can' ? 3 : c.kind === 'sandwich' ? 1 : 0), 0);
+  const cannotCover = waterDeficit > myWater || foodDeficit > myFood;
+
+  // フルーツバスケット：自前で埋めきれない不足の最後の切り札（全員＝自分も救う）。
+  // 溜め込み屋・狙撃手でも「自分が死ぬ」より遥かにマシなので切る。
+  const fb = p.hand.find((c) => c.kind === 'fruit_basket');
+  if (fb && cannotCover) return [fb.id];
+
+  // 溜め込み屋＆終盤の自己中は素直には出さない（投票で詰むまで温存）
+  const willShare = desperate || (!late && selfish < 0.6);
   if (!willShare) return [];
 
+  let wd = waterDeficit;
+  let fd = foodDeficit;
   const ids: string[] = [];
   for (const c of [...p.hand]) {
-    if (waterDeficit > 0 && (c.kind === 'water_bottle')) {
+    if (wd > 0 && c.kind === 'water_bottle') {
       ids.push(c.id);
-      waterDeficit -= 1;
-    } else if (foodDeficit > 0 && c.kind === 'sardine_can') {
+      wd -= 1;
+    } else if (wd > 0 && desperate && c.kind === 'dirty_water') {
+      ids.push(c.id); // 病気覚悟で水を供出（協力的/臆病者のみ）
+      wd -= 1;
+    } else if (fd > 0 && c.kind === 'sardine_can') {
       ids.push(c.id);
-      foodDeficit -= 3;
-    } else if (foodDeficit > 0 && c.kind === 'sandwich') {
+      fd -= 3;
+    } else if (fd > 0 && c.kind === 'sandwich') {
       ids.push(c.id);
-      foodDeficit -= 1;
+      fd -= 1;
+    } else if (fd > 0 && desperate && c.kind === 'rotten_fish') {
+      ids.push(c.id); // 病気覚悟で食料を供出
+      fd -= 1;
     }
   }
   return ids;
@@ -83,19 +104,34 @@ export function aiVote(s: GameState, p: Player, rng: Rng): string | null {
   if (cands.length === 0) return null;
   const per = persona(me);
   const { voteSmart } = difficultyParams(diff(me, s));
-  // 重み：手札(脅威/裕福)を重視 or ランダム寄り
+  // 重み：手札(脅威/裕福)＋出し渋り（供出しなかった者）を優先的に追放。
   const score = (x: Player) => {
     const threat = x.hand.length * (per === 'sniper' || per === 'hoarder' ? 2.5 : 1.2);
+    const freeload = x.contributedThisRound === false ? 3 : 0; // 貢献しなかった者は槍玉に
     const noise = rng.next() * (1 - voteSmart) * 6;
-    return threat + noise;
+    return threat + freeload + noise;
   };
   let target = cands[0];
   for (const x of cands) if (score(x) > score(target)) target = x;
   return target.id;
 }
 
-export function aiEscape(_s: GameState, _p: Player): boolean {
-  return true;
+/** 出航するか（leave）／残るか。抜け駆けは終盤の決断にして、序盤は皆で増席を狙う。 */
+export function aiEscape(s: GameState, p: Player): boolean {
+  const need = aliveCount(s);
+  const capacity = Math.min(s.raftSeats, s.food, s.water);
+  if (capacity <= 0) return false;
+  if (capacity >= need) return true; // 全員乗れるなら出航（＝勝ち）
+  // ここから先は抜け駆け局面（席が足りない）。
+  if (s.config.soleSurvivor) return true; // 単独勝利モードは迷わず乗る
+  const per = persona(p);
+  const late = s.hurricaneRevealed || s.weatherDeck.length <= 3;
+  // 協力的は終盤まで仲間を待って全員ぶんの増席を狙う（序盤の早すぎる解散を防ぐ）。
+  if (per === 'cooperative' && !late) return false;
+  // 席を取れる見込み（自分より貢献の多い者が capacity 未満）があれば乗る。
+  const others = alivePlayers(s).filter((x) => x.id !== p.id);
+  const richer = others.filter((x) => x.hand.length > p.hand.length).length;
+  return richer < capacity;
 }
 
 const CHAT_LINES: Record<BotPersona, string[]> = {

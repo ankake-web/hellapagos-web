@@ -70,6 +70,8 @@ export interface Player {
   votesReceived?: number;
   /** その日に行動済みか（生存ウィンドウのパスにも流用） */
   acted: boolean;
+  /** このラウンドの生存ウィンドウで共有プールへ資源を供出したか（出し渋り可視化用）。毎ラウンド頭でリセット */
+  contributedThisRound?: boolean;
   /** 使用して公開済みの永続カード種別（斧・銃など。使うまで他者には非公開） */
   revealed: CardKind[];
   botPersona?: BotPersona;
@@ -82,6 +84,8 @@ export interface GameConfig {
   speed: Speed;
   /** 人間の手番の制限時間（秒）。0 = 無制限 */
   timeLimit: number;
+  /** 短期決戦：天候デッキを縮め、ハリケーンを早めに到来させる（手早く決着） */
+  quickGame: boolean;
   seed: number;
 }
 
@@ -126,7 +130,9 @@ export interface GameState {
   // 一時状態
   nextParentId?: string | null; // 目覚まし時計で指定された次の親
   fruitUsed?: boolean; // 当ラウンドにフルーツバスケットで死者ゼロ確定
-  lastWoodGain?: { playerId: string; amount: number }; // 直近の木集めで得た木（血清で失う）
+  // 直近の木集め（血清で巻き戻す）。座席トラックは最大到達でクランプされ増分逆算では戻せないため、
+  // 行動前のスナップショットを保持してそこへ正確に復元する。
+  lastWoodGain?: { playerId: string; amount: number; prevSeats: number; prevProgress: number };
   // ログ・結果
   log: LogEntry[];
   logSeq: number;
@@ -152,12 +158,15 @@ export interface PublicPlayer {
   resting: boolean;
   acted: boolean;
   handCount: number;
+  /** このラウンドの生存ウィンドウで供出したか（公開情報＝出し渋りが社会的事実になる） */
+  contributedThisRound?: boolean;
   /** 永続カード（場に出ている＝公開情報） */
   permanents: CardKind[];
   votesReceived?: number;
   isYou: boolean;
   hand?: Card[]; // 本人のみ
   vote?: string | null; // 本人のみ
+  escapeChoice?: boolean; // 本人のみ（脱出フェイズで出航するか決めたか）
   persona?: BotPersona; // gameover時のみ
 }
 
@@ -210,7 +219,7 @@ export interface LeaderboardEntry {
 // ===== Socket.IO イベント =====
 
 export type Ack =
-  | { ok: true; roomId: string; playerId: string; spectator?: boolean }
+  | { ok: true; roomId: string; playerId: string; spectator?: boolean; token?: string }
   | { ok: false; error: string };
 
 export interface ServerToClientEvents {
@@ -223,14 +232,20 @@ export interface ServerToClientEvents {
 export interface ClientToServerEvents {
   'room:create': (p: { name: string }, cb: (res: Ack) => void) => void;
   'room:join': (p: { roomId: string; name: string }, cb: (res: Ack) => void) => void;
-  'room:rejoin': (p: { roomId: string; playerId: string }, cb: (res: Ack) => void) => void;
+  'room:rejoin': (p: { roomId: string; playerId: string; token?: string }, cb: (res: Ack) => void) => void;
   'room:leave': () => void;
   'room:addBot': () => void;
   'room:removeBot': (p: { botId: string }) => void;
-  'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) => void;
+  'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number; quickGame?: boolean }) => void;
   'game:start': () => void;
+  /** ひとりで今すぐ：ルーム作成→CPU自動補充→即開始を1発で行う */
+  'game:quickStart': (p: { name: string; bots?: number }, cb: (res: Ack) => void) => void;
+  /** 同じ顔ぶれでもう1戦：構成を保ったままロビーへ戻す（ホストのみ） */
+  'game:rematch': () => void;
   'action:choose': (p: { action: ActionType; woodPush?: number }) => void;
   'card:play': (p: { cardId: string; targetId?: string | null }) => void;
+  /** 資源カードなどを特定の相手へ渡す（ニセ協力の貸し借り・取引） */
+  'card:gift': (p: { cardId: string; targetId: string }) => void;
   'survival:pass': () => void;
   'vote:cast': (p: { targetId: string | null }) => void;
   'escape:vote': (p: { leave: boolean }) => void;

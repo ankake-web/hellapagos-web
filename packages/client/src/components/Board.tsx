@@ -9,7 +9,10 @@ interface Props {
   chat: ChatMessage[];
   onSay: (text: string) => void;
   onLeave: () => void;
+  onRematch: () => void;
 }
+
+type TargetMode = 'gun' | 'voodoo' | 'gift';
 
 const ACTION_LABEL: Record<ActionType, string> = {
   fish: '🎣 釣り',
@@ -35,9 +38,9 @@ function weatherLabel(v: PublicGameState): string {
   return `🌦️ 雨（降水${v.currentPrecip}）`;
 }
 
-export function Board({ view, chat, onSay, onLeave }: Props) {
+export function Board({ view, chat, onSay, onLeave, onRematch }: Props) {
   const me = view.players.find((p) => p.isYou);
-  const [targeting, setTargeting] = useState<{ card: Card; mode: 'gun' | 'voodoo' } | null>(null);
+  const [targeting, setTargeting] = useState<{ card: Card; mode: TargetMode } | null>(null);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [tab, setTab] = useState<'log' | 'chat'>('log');
   const freshDraw = useFreshDraw(view);
@@ -46,15 +49,23 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
 
   const targetable = (p: PublicPlayer): boolean => {
     if (!targeting) return false;
-    if (targeting.mode === 'gun') return p.alive && !p.escaped && !p.isYou;
-    return !p.alive && !p.escaped; // voodoo
+    if (targeting.mode === 'voodoo') return !p.alive && !p.escaped; // 死者を選ぶ
+    return p.alive && !p.escaped && !p.isYou; // gun / gift は生存者
   };
   const pickTarget = (p: PublicPlayer) => {
     if (!targeting || !targetable(p)) return;
     playSound('click');
-    api.playCard(targeting.card.id, p.id);
+    if (targeting.mode === 'gift') api.gift(targeting.card.id, p.id);
+    else api.playCard(targeting.card.id, p.id);
     setTargeting(null);
   };
+  const targetLabel = targeting
+    ? targeting.mode === 'gun'
+      ? '撃つ相手'
+      : targeting.mode === 'voodoo'
+        ? '蘇生する相手'
+        : '渡す相手'
+    : '';
 
   const weatherClass = view.hurricaneRevealed ? 'w-storm' : view.currentPrecip === 0 ? 'w-sunny' : 'w-rain';
   return (
@@ -65,9 +76,10 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
       <DrawCenter view={view} draw={freshDraw} />
       <EventFX view={view} />
       <FlyLayer view={view} />
+      <LiveAnnouncer view={view} />
       {targeting && (
         <div className="banner target">
-          {CARD_INFO[targeting.card.kind].icon} {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
+          {CARD_INFO[targeting.card.kind].icon} {targetLabel}を選択
           <button className="btn ghost small" onClick={() => setTargeting(null)}>キャンセル</button>
         </div>
       )}
@@ -99,7 +111,33 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           }}
         />
       )}
-      {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} />}
+      {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} onRematch={onRematch} />}
+    </div>
+  );
+}
+
+/** スクリーンリーダー向け：フェイズ遷移と直近の重要イベントを読み上げる非表示ライブ領域。 */
+function LiveAnnouncer({ view }: { view: PublicGameState }) {
+  const [msg, setMsg] = useState('');
+  const lastPhase = useRef('');
+  const lastEvent = useRef(-1);
+  useEffect(() => {
+    if (view.phase !== lastPhase.current) {
+      lastPhase.current = view.phase;
+      const turn = view.isYourTurn ? '——あなたの番です' : '';
+      setMsg(`${phaseLabel(view)}フェイズ${turn}`);
+    }
+  }, [view.phase, view.isYourTurn]);
+  useEffect(() => {
+    const e = [...view.log].reverse().find((x) => x.kind === 'death' || x.kind === 'escape' || x.kind === 'snake' || x.text.includes('ハリケーン'));
+    if (e && e.id !== lastEvent.current) {
+      lastEvent.current = e.id;
+      setMsg(e.text);
+    }
+  }, [view.log]);
+  return (
+    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {msg}
     </div>
   );
 }
@@ -247,6 +285,11 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
         {dead && <span className="badge death">死亡💀</span>}
         {p.sick && p.alive && <span className="badge sick">病気🐍</span>}
         {p.resting && p.alive && <span className="badge sick">休み💤</span>}
+        {(view.phase === 'survival' || view.phase === 'vote') && p.alive && !p.escaped && (
+          p.contributedThisRound
+            ? <span className="badge gave" title="このラウンド、共有プールへ供出した">供出✓</span>
+            : <span className="badge hold" title="このラウンド、何も供出していない">出し渋り</span>
+        )}
         {!myDraw && !dead && !p.escaped && isActor && view.phase === 'action' && <span className="badge actor">手番</span>}
         {!dead && !p.escaped && p.acted && view.phase === 'action' && <span className="badge done">✓</span>}
       </div>
@@ -266,7 +309,8 @@ function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) 
 
   switch (view.phase) {
     case 'action':
-      return <ActionPanel view={view} me={me} />;
+      // ラウンド/手番が変わるたび再マウントして woodPush スライダーを0へ戻す。
+      return <ActionPanel key={`${view.round}-${view.currentActorId}`} view={view} me={me} />;
     case 'survival':
       return <SurvivalPanel view={view} me={me} />;
     case 'vote':
@@ -341,14 +385,27 @@ function VotePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   );
 }
 
-function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
+function EscapePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
+  if (me.escapeChoice !== undefined) {
+    return <div className="panel escape"><h3>出航の決断</h3><p className="hint">決定しました。他の生存者を待っています…</p></div>;
+  }
+  const capacity = Math.min(view.raftSeats, view.food, view.water);
+  const everyone = capacity >= view.seatsNeeded;
   return (
     <div className="panel escape">
-      <h3>脱出のチャンス！</h3>
-      <p>座席{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
+      <h3>{everyone ? '脱出のチャンス！' : '⚠ 抜け駆けの誘惑'}</h3>
+      {everyone ? (
+        <p>座席{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
+      ) : (
+        <p className="short">
+          筏は<strong>{capacity}人ぶん</strong>しかない（生存{view.seatsNeeded}人）。
+          全員は乗れない——出航すれば席を<strong>奪い合い</strong>、乗れた者だけ脱出（残席は島に残る）。
+          残れば次の便を待てるが、その保証はない。
+        </p>
+      )}
       <div className="panel-actions">
-        <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>まだ残る</button>
-        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>🛶 出航する！</button>
+        <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>島に残る</button>
+        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>🛶 {everyone ? '出航する！' : '抜け駆けして乗る'}</button>
       </div>
     </div>
   );
@@ -411,10 +468,15 @@ function ItemModal({
   me: PublicPlayer;
   card: Card;
   onClose: () => void;
-  onUse: (card: Card, mode: 'gun' | 'voodoo' | null) => void;
+  onUse: (card: Card, mode: TargetMode | null) => void;
 }) {
   const info = CARD_INFO[card.kind];
   const u = cardUsable(view, me, card);
+  // 指名贈与：資源/単発/無用品カードを、自分の手番か生存ウィンドウで相手に渡せる。
+  const giftable =
+    (info.cat === 'resource' || info.cat === 'single' || info.cat === 'junk') &&
+    ((view.phase === 'action' && view.isYourTurn) || view.phase === 'survival') &&
+    view.players.some((p) => p.alive && !p.escaped && !p.isYou);
   const use = () => {
     if (!u.ok) return;
     if (card.kind === 'gun') return onUse(card, 'gun');
@@ -431,8 +493,12 @@ function ItemModal({
         <p className="item-desc">{info.desc}</p>
         <p className="hint">カードを使っても、このターンの行動（釣り・水汲み・木集め・探索）は別に行えます。</p>
         {!u.ok && u.reason && <p className="short">{u.reason}</p>}
+        {giftable && <p className="hint">🎁 このカードは仲間に「渡す」こともできます（貸し借り・取引・恩売り）。</p>}
         <div className="panel-actions">
           <button className="btn ghost" onClick={onClose}>やめる</button>
+          {giftable && (
+            <button className="btn" onClick={() => onUse(card, 'gift')}>🎁 渡す（相手を選ぶ）</button>
+          )}
           <button className="btn primary" disabled={!u.ok} onClick={use}>
             {card.kind === 'gun' || card.kind === 'voodoo' ? '使う（相手を選ぶ）' : '使う'}
           </button>
@@ -655,7 +721,7 @@ function EventFX({ view }: { view: PublicGameState }) {
   );
 }
 
-function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPlayer; onLeave: () => void }) {
+function GameOver({ view, me, onLeave, onRematch }: { view: PublicGameState; me?: PublicPlayer; onLeave: () => void; onRematch: () => void }) {
   const escaped = view.players.filter((p) => p.escaped);
   const dead = view.players.filter((p) => !p.alive && !p.escaped);
   const sole = view.config.soleSurvivor;
@@ -679,7 +745,12 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
           <div><h4>島に消えた（{dead.length}）</h4><ul>{dead.map((p) => line(p, '💀'))}{dead.length === 0 && <li className="hint">なし</li>}</ul></div>
         </div>
         <p className="hint">（カッコ内はAIの正体＝性格）</p>
-        <button className="btn primary" onClick={onLeave}>新しいゲームへ</button>
+        <div className="panel-actions">
+          {!view.isSpectator && me && view.hostId === me.id && (
+            <button className="btn primary" onClick={onRematch}>🔁 同じ顔ぶれでもう1戦</button>
+          )}
+          <button className="btn" onClick={onLeave}>新しいゲームへ</button>
+        </div>
       </div>
     </div>
   );

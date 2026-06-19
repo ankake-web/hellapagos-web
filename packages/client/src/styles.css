@@ -543,3 +543,36 @@ html.fx-shake .board { animation: shake 0.46s ease-in-out; }
   100% { transform: translate(calc(-50% + var(--fdx)), calc(-50% + var(--fdy))) scale(0.5); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .fly-token { display: none; } }
+
+/* ===== 監査対応：供出の可視化・スクリーンリーダー・モーション配慮 ===== */
+/* 出し渋り／供出バッジ（誰が貢献したかを社会的事実にする） */
+.badge.gave { background: var(--good); color: #08302a; border: none; font-weight: 700; }
+.badge.hold { background: var(--danger); color: #fff; border: none; font-weight: 700; }
+
+/* スクリーンリーダー専用（視覚的には隠すが読み上げ対象） */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* 光感受性・前庭障害への配慮：全画面フラッシュや激しいバウンスを無効化／穏やかなフェードへ。 */
+@media (prefers-reduced-motion: reduce) {
+  .fx-flash { animation: none; opacity: 0; display: none; }
+  .event-card { animation: fadein-soft 0.25s ease-out forwards; }
+  .event-card .ev-ic { animation: none; }
+  .ball { animation: none !important; }
+  .num-pop { animation: none; }
+  .day-splash, .day-splash-inner { animation: none; }
+  .result, .result.win, .result.lose { animation: none; }
+  .draw-pop { animation: none; }
+  html.fx-shake .board { animation: none; }
+}
+@keyframes fadein-soft { from { opacity: 0; } to { opacity: 1; } }
+
+/* 実績バッジ（トップ画面） */
+.badges { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; margin-top: 0.6rem; }
+.badge-chip {
+  font-size: 0.74rem; padding: 0.2rem 0.55rem; border-radius: 999px;
+  background: rgba(255, 206, 106, 0.14); border: 1px solid rgba(255, 206, 106, 0.4);
+  color: var(--sand); white-space: nowrap;
+}

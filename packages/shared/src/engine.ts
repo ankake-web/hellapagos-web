@@ -173,7 +173,7 @@ export function startGame(s: GameState): GameState {
   const sup = initialSupplies(n);
   d.food = sup.food;
   d.water = sup.water;
-  d.weatherDeck = buildWeatherDeck(rng);
+  d.weatherDeck = buildWeatherDeck(rng, d.config.quickGame);
   const { deck, nextSeq } = buildWreckageDeck(rng, d.cardSeq);
   d.deck = deck;
   d.cardSeq = nextSeq;
@@ -210,6 +210,7 @@ function beginRound(d: GameState): GameState {
     p.acted = false;
     p.vote = undefined;
     p.escapeChoice = undefined;
+    p.contributedThisRound = false;
   }
   d.fruitUsed = false;
   d.lastWoodGain = undefined;
@@ -289,6 +290,8 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
       break;
     }
     case 'wood': {
+      const prevSeats = d.raftSeats;
+      const prevProgress = d.raftProgress;
       const base = 1 + (hasPermanent(p, 'axe') ? 1 : 0);
       if (hasPermanent(p, 'axe')) reveal(p, 'axe');
       addWood(d, base);
@@ -309,7 +312,7 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
         d.lastDraw = { playerId, balls: [], action };
         pushLog(d, `${p.name} は木を集めた（+${base}）。`, 'good', playerId);
       }
-      d.lastWoodGain = { playerId, amount: gained };
+      d.lastWoodGain = { playerId, amount: gained, prevSeats, prevProgress };
       recordGain(d, playerId, 'wood', gained);
       break;
     }
@@ -423,7 +426,7 @@ function eligibleVoters(d: GameState): Player[] {
 function startVote(d: GameState): GameState {
   for (const p of d.players) {
     p.vote = undefined;
-    (p as { votesReceived?: number }).votesReceived = undefined;
+    p.votesReceived = undefined;
   }
   d.phase = 'vote';
   return d;
@@ -452,7 +455,7 @@ export function resolveVote(s: GameState): GameState {
   // 集計
   const tally = new Map<string, number>();
   for (const v of eligibleVoters(d)) if (v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + 1);
-  for (const p of d.players) (p as { votesReceived?: number }).votesReceived = tally.get(p.id) ?? 0;
+  for (const p of d.players) p.votesReceived = tally.get(p.id) ?? 0;
 
   const candidates = alivePlayers(d);
   let max = -1;
@@ -487,7 +490,12 @@ export function resolveVote(s: GameState): GameState {
   } else {
     const votes = victim.votesReceived ?? 0;
     killPlayer(d, victim);
-    pushLog(d, `${victim.name} は${votes}票を集め、海へ突き落とされた……`, 'death', victim.id);
+    if (votes > 0) {
+      pushLog(d, `${victim.name} は${votes}票を集め、海へ突き落とされた……`, 'death', victim.id);
+    } else {
+      // 投票が成立しなかった（全員病気/棄権など）→ 親裁定・手札最少で確定。
+      pushLog(d, `投票がまとまらず、${victim.name} が脱落することになった……`, 'death', victim.id);
+    }
     d.pendingEliminations -= 1;
   }
 
@@ -505,7 +513,7 @@ function afterVoteBatch(d: GameState): GameState {
   d.voteReason = undefined;
   if (reason === 'water') return consumeFood(d);
   if (reason === 'food') return endRoundCheck(d);
-  if (reason === 'hurricane') return resolveHurricaneEscape(d);
+  if (reason === 'hurricane') return hurricaneBoard(d);
   return endRoundCheck(d);
 }
 
@@ -617,23 +625,32 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
     case 'dirty_water':
     case 'sandwich':
     case 'sardine_can':
-    case 'rotten_fish':
-    case 'fruit_basket': {
+    case 'rotten_fish': {
+      // 資源カードは自分の手番・生存ウィンドウ・投票中に共有プールへ供出できる。
       if (d.phase !== 'survival' && d.phase !== 'action' && d.phase !== 'vote') return s;
       applyResourceCard(d, p, c.kind);
+      if (d.phase === 'survival') p.contributedThisRound = true; // 供出を社会的事実として記録
       pushLog(d, `${p.name} は ${cardName(c.kind)} を使った。`, 'card', playerId);
+      break;
+    }
+    case 'fruit_basket': {
+      // フルーツバスケットは「不足時に誰も死なない」切り札。蓄えを0にする副作用が大きいので、
+      // 生存ウィンドウ中かつ実際に不足が迫っているときのみ使える（行動フェイズでの先撃ち荒らしを禁止）。
+      if (d.phase !== 'survival') return s;
+      const need = aliveCount(d);
+      if (d.water >= need && d.food >= need) return s; // 不足が無ければ無駄撃ち禁止
+      applyResourceCard(d, p, c.kind);
+      p.contributedThisRound = true;
+      pushLog(d, `${p.name} は ${cardName(c.kind)} を使った（このラウンドは誰も飢え死にしない）。`, 'card', playerId);
       break;
     }
     case 'serum': {
       if (!p.sick) return s;
       p.sick = false;
-      if (d.lastWoodGain?.playerId === playerId && d.lastWoodGain.amount > 0) {
-        d.raftProgress -= d.lastWoodGain.amount;
-        while (d.raftProgress < 0 && d.raftSeats > 0) {
-          d.raftSeats -= 1;
-          d.raftProgress += RAFT_LOOP;
-        }
-        if (d.raftProgress < 0) d.raftProgress = 0;
+      // その回の木集めで得た木を失う：行動前スナップショットへ正確に復元（座席クランプ対策）。
+      if (d.lastWoodGain?.playerId === playerId) {
+        d.raftSeats = d.lastWoodGain.prevSeats;
+        d.raftProgress = d.lastWoodGain.prevProgress;
         d.lastWoodGain = undefined;
       }
       removeOneCard(p, 'serum');
@@ -674,6 +691,8 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
       break;
     }
     case 'gun': {
+      // 脱出の決断フェイズでの発砲は禁止（デジタル版の手番＋生存/投票ウィンドウに限定）。
+      if (d.phase === 'escape') return s;
       // 弾が必要
       if (!hasCard(p, 'bullet')) return s;
       const t = targetId ? find(d, targetId) : undefined;
@@ -703,6 +722,29 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
   return d;
 }
 
+/**
+ * 指名贈与：手札のカードを特定の生存者へ渡す（ニセ協力の貸し借り・取引・恩売り）。
+ * デジタル近似として「自分の手番（行動フェイズ）」または「生存ウィンドウ」でのみ許可。
+ */
+export function giftCard(s: GameState, playerId: string, cardId: string, targetId: string): GameState {
+  if (s.phase !== 'action' && s.phase !== 'survival') return s;
+  const giver = find(s, playerId);
+  if (!giver || !giver.alive || giver.escaped || giver.resting) return s;
+  if (s.phase === 'action' && currentActorId(s) !== playerId) return s;
+  const target = find(s, targetId);
+  if (!target || !target.alive || target.escaped || target.id === playerId) return s;
+  if (!giver.hand.some((c) => c.id === cardId)) return s;
+  const d = clone(s);
+  const g = find(d, playerId)!;
+  const t = find(d, targetId)!;
+  const i = g.hand.findIndex((c) => c.id === cardId);
+  if (i < 0) return s;
+  const [moved] = g.hand.splice(i, 1);
+  t.hand.push(moved);
+  pushLog(d, `${g.name} は ${t.name} にカードを1枚渡した。`, 'card', playerId);
+  return d;
+}
+
 function cardName(kind: CardKind): string {
   const map: Partial<Record<CardKind, string>> = {
     water_bottle: '水ボトル',
@@ -725,7 +767,7 @@ function endRoundCheck(d: GameState): GameState {
   }
   if (d.hurricaneRevealed) {
     const boardable = Math.min(d.raftSeats, d.food, d.water);
-    if (boardable >= need) return doEscape(d, alivePlayers(d));
+    if (boardable >= need) return hurricaneBoard(d);
     if (boardable <= 0) {
       for (const p of alivePlayers(d)) p.alive = false;
       pushLog(d, `ハリケーンに飲まれ、誰も脱出できなかった……`, 'death');
@@ -737,19 +779,27 @@ function endRoundCheck(d: GameState): GameState {
     pushLog(d, `ハリケーン：筏に乗れるのは${boardable}人。${d.pendingEliminations}人を投票で決める。`, 'bad');
     return startVote(d);
   }
-  // 通常ラウンド：脱出可能なら任意脱出の決断へ
-  if (canEscapeAll(d)) {
+  // 通常ラウンド：筏に1人でも乗れる席があれば「出航の決断」へ。
+  // 全員ぶん無くても、抜け駆けして自分だけ（少数だけ）乗ることを選べる＝ニセ協力の核。
+  const capacity = Math.min(d.raftSeats, d.food, d.water);
+  if (capacity >= 1) {
     for (const p of d.players) p.escapeChoice = undefined;
     d.phase = 'escape';
-    pushLog(d, `脱出の条件を満たした（座席${d.raftSeats}/必要${need}、補給も十分）。出航するか投票。`, 'good');
+    if (capacity >= need) {
+      pushLog(d, `脱出の条件を満たした（座席${d.raftSeats}/必要${need}、補給も十分）。出航するか決める。`, 'good');
+    } else {
+      pushLog(d, `筏は${capacity}人ぶん。全員は乗れない——抜け駆けで出航するか、残って増席を待つか。`, 'bad');
+    }
     return d;
   }
   return beginRound(d);
 }
 
-function resolveHurricaneEscape(d: GameState): GameState {
-  // 余剰を削った後、乗れる全員が脱出
-  return doEscape(d, alivePlayers(d));
+/** ハリケーン：余剰を削ったあと、乗れる全員が脱出して決着（最終ラウンド）。 */
+function hurricaneBoard(d: GameState): GameState {
+  boardEscapees(d, alivePlayers(d));
+  d.phase = 'gameover';
+  return d;
 }
 
 export function setEscapeChoice(s: GameState, playerId: string, leave: boolean): GameState {
@@ -765,24 +815,46 @@ export function isEscapeReady(s: GameState): boolean {
 export function resolveEscape(s: GameState): GameState {
   if (s.phase !== 'escape') return s;
   const d = clone(s);
-  const voters = alivePlayers(d);
-  const leave = voters.filter((p) => p.escapeChoice === true).length;
-  if (leave > voters.length - leave) {
-    pushLog(d, `多数決で出航が決まった。`, 'good');
-    return doEscape(d, voters);
+  const alive = alivePlayers(d);
+  const leavers = alive.filter((p) => p.escapeChoice === true);
+  if (leavers.length === 0) {
+    pushLog(d, `誰も出航しなかった。島でもう1ラウンド。`, 'info');
+    return beginRound(d);
   }
-  pushLog(d, `出航は見送られた。島でもう1ラウンド。`, 'info');
+  const capacity = Math.min(d.raftSeats, d.food, d.water);
+  let escapees = leavers;
+  if (leavers.length > capacity) {
+    // 席の奪い合い：積んだ物資（手札の多さ＝貢献）が多い順に優先、僅差は乱数で。
+    const rng = new Rng(d.rngState);
+    escapees = [...leavers]
+      .map((p) => ({ p, k: p.hand.length + rng.next() }))
+      .sort((a, b) => b.k - a.k)
+      .slice(0, capacity)
+      .map((x) => x.p);
+    d.rngState = rng.state;
+    pushLog(d, `座席は${capacity}しか無く、奪い合いになった。`, 'bad');
+  }
+  boardEscapees(d, escapees);
+  if (aliveCount(d) <= 0) {
+    d.phase = 'gameover';
+    return d;
+  }
+  // 筏は脱出者とともに去った。残された者は座席を一から作り直してもう1ラウンド。
   return beginRound(d);
 }
 
-function doEscape(d: GameState, survivors: Player[]): GameState {
-  for (const p of survivors) {
+/** 脱出者を筏に乗せて勝者にし、使った座席と航海ぶんの補給を消費。残席は残った者へ引き継がれる。 */
+function boardEscapees(d: GameState, escapees: Player[]): void {
+  if (escapees.length === 0) return;
+  for (const p of escapees) {
     p.escaped = true;
     d.winners.push(p.id);
   }
-  pushLog(d, `${survivors.length}人が筏で島を脱出した！🛶`, 'escape');
-  d.phase = 'gameover';
-  return d;
+  const n = escapees.length;
+  d.food = Math.max(0, d.food - n);
+  d.water = Math.max(0, d.water - n);
+  d.raftSeats = Math.max(0, d.raftSeats - n); // 先に行った者の席は去る。残席は残留者が使える。
+  pushLog(d, `${n}人が筏で島を脱出した！🛶`, 'escape');
 }
 
 // ===== サーバ進行用 =====
