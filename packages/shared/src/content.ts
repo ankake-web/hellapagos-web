@@ -11,7 +11,8 @@ export const DEFAULT_CONFIG: GameConfig = {
   soleSurvivor: false,
   difficulty: 'normal',
   speed: 'normal',
-  timeLimit: 120, // 既定2分。初心者向け。0で無制限
+  timeLimit: 0, // 既定は無制限（じっくり考えられる）。ロビーで制限時間を設定可。
+  quickGame: false,
   seed: 1,
 };
 
@@ -63,17 +64,27 @@ export function initialSupplies(n: number): { food: number; water: number } {
   return { food, water };
 }
 
-// ===== 天候デッキ（12枚：ハリケーン1＋降水量0×2,1×3,2×3,3×3）=====
-// ハリケーン＋ランダム5を下半分に重ねる → 7〜12ラウンドで出現
-export function buildWeatherDeck(rng: Rng): WeatherCard[] {
-  const precips = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]; // 11枚
+// ===== 天候デッキ =====
+// 通常12枚：ハリケーン1＋降水量0×2,1×3,2×3,3×3。ハリケーン＋ランダム5を下半分に重ね 7〜12Rで出現。
+// 短期決戦8枚：ハリケーンを下半分（5〜8R）へ。手早く決着する。
+export function buildWeatherDeck(rng: Rng, quickGame = false): WeatherCard[] {
+  const precips = quickGame ? [0, 1, 1, 2, 2, 3, 3] : [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3];
+  const half = quickGame ? 3 : 5; // 下半分（ハリケーンと混ぜる非ハリケーン札の枚数）
   const others: WeatherCard[] = precips.map((p) => ({ precip: p, hurricane: false }));
   const shuffled = rng.shuffle(others);
-  const bottomOthers = shuffled.slice(0, 5);
-  const topOthers = shuffled.slice(5); // 6枚
+  const bottomOthers = shuffled.slice(0, half);
+  const topOthers = shuffled.slice(half);
   const hurricane: WeatherCard = { precip: 0, hurricane: true };
-  const bottom = rng.shuffle([...bottomOthers, hurricane]); // 6枚（ハリケーン含む）
-  const top = rng.shuffle(topOthers); // 6枚
+  const bottom = rng.shuffle([...bottomOthers, hurricane]); // ハリケーンを含む下半分
+  const top = rng.shuffle(topOthers);
+  // 序盤クッション：最初の2ラウンドは降水量≥1を保証（初日が降水0だと水を一切汲めず、
+  // 構造的に序盤で水不足→生贄が頻発するため）。先頭の0札を後方の≥1札と入れ替える。
+  for (let i = 0; i < 2 && i < top.length; i++) {
+    if (top[i].precip === 0) {
+      const swap = top.findIndex((c, j) => j >= 2 && c.precip > 0);
+      if (swap >= 0) [top[i], top[swap]] = [top[swap], top[i]];
+    }
+  }
   return [...top, ...bottom]; // index0 = 最初に公開
 }
 

@@ -22,11 +22,13 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
       resting: p.resting,
       acted: p.acted,
       handCount: p.hand.length,
+      contributedThisRound: p.contributedThisRound,
       permanents,
       votesReceived: p.votesReceived,
       isYou,
       hand: isYou ? p.hand : undefined,
       vote: isYou ? p.vote : undefined,
+      escapeChoice: isYou ? p.escapeChoice : undefined,
       persona: over && p.isBot ? p.botPersona : undefined,
     };
   });

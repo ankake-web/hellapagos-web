@@ -43,8 +43,8 @@ docker run -p 8787:8787 hellapagos
 動作確認：`/health` が `{"ok":true}`、トップでルーム作成→AI追加→開始。
 
 メモ:
-- 無料プランはアイドルでスリープ（初回アクセスが数十秒遅い）。
-- 無料はディスクが揮発するため**ランキングは再デプロイでリセット**。永続化するなら Disk を `/opt/render/project/src/packages/server/data` にマウント。
+- 無料プランはアイドルでスリープ（初回アクセスが数十秒遅い）＋**ディスク揮発＝戦績が再デプロイで消える**。
+- `render.yaml` は永続ディスク（`/var/data`）と `LEADERBOARD_DIR=/var/data` を設定済み（starter 以上が必要）。free のままなら戦績は揮発する前提で運用すること。
 - `tsx` 等の devDependencies はビルド時に入り、その node_modules が実行時にも使われる（`--include=dev` で確実に導入）。
 
 ## B. Fly.io（Volume で永続化しやすい）
@@ -64,7 +64,9 @@ fly open
 
 メモ:
 - `fly.toml` の `internal_port = 8787` はサーバ既定と一致済み。
-- ランキング永続化は Volume を作成してマウント（`fly.toml` のコメント参照）。
+- 戦績の Volume と `LEADERBOARD_DIR=/data` は `fly.toml` に設定済み。デプロイ前に `fly volumes create hellapagos_data --size 1 --region nrt` を実行。
+- ライブ運用では `min_machines_running = 1`（設定済み）。アイドル自動停止で**対戦中の卓が消える**のを防ぐため。コスト最優先なら 0 に戻す。
+- `kill_timeout`（設定済み）でグレースフルシャットダウンの猶予を確保（戦績フラッシュ）。
 
 ## C. その他（Railway / VPS など）
 
@@ -78,7 +80,20 @@ fly open
 | 変数 | 既定 | 用途 |
 |------|------|------|
 | `PORT` | 8787 | 待受ポート（多くのホストが自動注入） |
-| `CLIENT_ORIGIN` | `*` | CORS 許可オリジン。単一オリジン運用なら既定でOK |
+| `NODE_ENV` | （未設定） | `production` で本番動作（CORS をクロスオリジン拒否側に倒す） |
+| `CLIENT_ORIGIN` | 開発: `*` / 本番: 同一オリジンのみ | CORS 許可オリジン。単一オリジン配信なら未設定でOK。別ドメインから接続するときだけ実ドメイン（カンマ区切り可）。**本番で `*` にはしない** |
+| `LEADERBOARD_DIR` | `packages/server/data` | 戦績JSONの保存先。**永続ディスクのマウント先**を指すこと（揮発ディスクだと再デプロイで消える） |
+| `ANTHROPIC_API_KEY` | （未設定） | CPUの会話をClaudeで生成（未設定ならスクリプト交渉へ自動フォールバック） |
+| `HELPAGOS_BOT_MODEL` | `claude-haiku-4-5` | CPU発言の生成モデル。表現力重視なら `claude-opus-4-8`（コスト増） |
+| `HELPAGOS_BOT_MAX_CONCURRENT` | 4 | LLM同時呼び出し上限（コスト防護） |
+| `HELPAGOS_BOT_MAX_PER_MIN` | 120 | LLM毎分呼び出し上限（コスト防護） |
+
+### 安全性・運用の要点（本番）
+- **CORS**: 本番（`NODE_ENV=production`）で `CLIENT_ORIGIN` 未設定なら同一オリジンのみ許可（クロスオリジン濫用＝ルーム乱立・LLMコスト消費の踏み台を防ぐ）。
+- **再接続認証**: 席はサーバ発行の秘密トークンで保護され、他人のIDだけでは乗っ取れない。
+- **グレースフルシャットダウン**: SIGTERM/SIGINT で戦績を即フラッシュしてから終了。ホストの停止猶予（Render: 標準 / Fly: `kill_timeout`）を確保しておく。
+- **ルームGC**: 決着後・無人放置のルームは自動回収（メモリリーク防止）。
+- **スケール**: 状態はプロセスメモリ常駐のため当面は**単一インスタンス＋スティッキー**前提（Socket.IO Redisアダプタ未導入）。水平スケールは将来課題。
 
 ## デプロイ後チェックリスト
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPlayer } from '@hellapagos/shared';
-import { CARD_INFO, MAX_SEATS, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
+import { CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
 import { playSound } from '../sound.js';
 
@@ -9,7 +9,10 @@ interface Props {
   chat: ChatMessage[];
   onSay: (text: string) => void;
   onLeave: () => void;
+  onRematch: () => void;
 }
+
+type TargetMode = 'gun' | 'voodoo' | 'gift';
 
 const ACTION_LABEL: Record<ActionType, string> = {
   fish: '🎣 釣り',
@@ -35,9 +38,9 @@ function weatherLabel(v: PublicGameState): string {
   return `🌦️ 雨（降水${v.currentPrecip}）`;
 }
 
-export function Board({ view, chat, onSay, onLeave }: Props) {
+export function Board({ view, chat, onSay, onLeave, onRematch }: Props) {
   const me = view.players.find((p) => p.isYou);
-  const [targeting, setTargeting] = useState<{ card: Card; mode: 'gun' | 'voodoo' } | null>(null);
+  const [targeting, setTargeting] = useState<{ card: Card; mode: TargetMode } | null>(null);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [tab, setTab] = useState<'log' | 'chat'>('log');
   const freshDraw = useFreshDraw(view);
@@ -46,28 +49,38 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
 
   const targetable = (p: PublicPlayer): boolean => {
     if (!targeting) return false;
-    if (targeting.mode === 'gun') return p.alive && !p.escaped && !p.isYou;
-    return !p.alive && !p.escaped; // voodoo
+    if (targeting.mode === 'voodoo') return !p.alive && !p.escaped; // 死者を選ぶ
+    return p.alive && !p.escaped && !p.isYou; // gun / gift は生存者
   };
   const pickTarget = (p: PublicPlayer) => {
     if (!targeting || !targetable(p)) return;
     playSound('click');
-    api.playCard(targeting.card.id, p.id);
+    if (targeting.mode === 'gift') api.gift(targeting.card.id, p.id);
+    else api.playCard(targeting.card.id, p.id);
     setTargeting(null);
   };
+  const targetLabel = targeting
+    ? targeting.mode === 'gun'
+      ? '撃つ相手'
+      : targeting.mode === 'voodoo'
+        ? '蘇生する相手'
+        : '渡す相手'
+    : '';
 
   const weatherClass = view.hurricaneRevealed ? 'w-storm' : view.currentPrecip === 0 ? 'w-sunny' : 'w-rain';
   return (
     <div className={`board ${weatherClass}`}>
       <Header view={view} />
       <WeatherFX view={view} />
+      <IntroSplash view={view} />
       <RoundSplash view={view} />
       <DrawCenter view={view} draw={freshDraw} />
       <EventFX view={view} />
       <FlyLayer view={view} />
+      <LiveAnnouncer view={view} />
       {targeting && (
         <div className="banner target">
-          {CARD_INFO[targeting.card.kind].icon} {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
+          {CARD_INFO[targeting.card.kind].icon} {targetLabel}を選択
           <button className="btn ghost small" onClick={() => setTargeting(null)}>キャンセル</button>
         </div>
       )}
@@ -76,7 +89,6 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           <Tracks view={view} />
           <PlayerGrid view={view} draw={freshDraw} targetable={targetable} onPick={pickTarget} />
           <PhasePanel view={view} me={me} />
-          {me && me.alive && !me.escaped && <Hand view={view} me={me} onSelect={setSelectedCard} />}
         </div>
         <div className={`board-right tab-${tab}`}>
           <div className="right-tabs">
@@ -87,6 +99,10 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           <Chat view={view} chat={chat} onSay={onSay} />
         </div>
       </div>
+      {/* 手札は常時見える下部ドック（大きめ・スマホでも常に表示） */}
+      {me && me.alive && !me.escaped && (me.hand?.length ?? 0) > 0 && (
+        <Hand view={view} me={me} onSelect={setSelectedCard} />
+      )}
       {selectedCard && me && (
         <ItemModal
           view={view}
@@ -99,7 +115,33 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           }}
         />
       )}
-      {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} />}
+      {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} onRematch={onRematch} />}
+    </div>
+  );
+}
+
+/** スクリーンリーダー向け：フェイズ遷移と直近の重要イベントを読み上げる非表示ライブ領域。 */
+function LiveAnnouncer({ view }: { view: PublicGameState }) {
+  const [msg, setMsg] = useState('');
+  const lastPhase = useRef('');
+  const lastEvent = useRef(-1);
+  useEffect(() => {
+    if (view.phase !== lastPhase.current) {
+      lastPhase.current = view.phase;
+      const turn = view.isYourTurn ? '——あなたの番です' : '';
+      setMsg(`${phaseLabel(view)}フェイズ${turn}`);
+    }
+  }, [view.phase, view.isYourTurn]);
+  useEffect(() => {
+    const e = [...view.log].reverse().find((x) => x.kind === 'death' || x.kind === 'escape' || x.kind === 'snake' || x.text.includes('ハリケーン'));
+    if (e && e.id !== lastEvent.current) {
+      lastEvent.current = e.id;
+      setMsg(e.text);
+    }
+  }, [view.log]);
+  return (
+    <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {msg}
     </div>
   );
 }
@@ -165,17 +207,20 @@ function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameSta
 
 function Header({ view }: { view: PublicGameState }) {
   const left = useCountdown(view.deadlineAt);
+  const storm = view.hurricaneRevealed
+    ? '🌀 本ラウンドで強制脱出'
+    : view.weatherRemaining <= 3
+      ? '🌀 嵐が近い…'
+      : `🌀 残り最大${view.weatherRemaining}日`;
   return (
     <header className="header">
       <div className="header-left">
-        <span className="day">{view.round}ラウンド</span>
-        <span className="weather">{weatherLabel(view)}</span>
-        <span className={`storm ${view.hurricaneRevealed ? 'urgent' : ''}`}>
-          {view.hurricaneRevealed ? '本ラウンドで強制脱出' : `天候カード残り ${view.weatherRemaining}`}
-        </span>
+        <span className="day"><b>{view.round}</b><small>日目</small></span>
+        <span className={`weather-chip ${view.hurricaneRevealed ? 'storm' : ''}`}>{weatherLabel(view)}</span>
       </div>
       <div className="header-right">
         {view.isSpectator && <span className="tag spectate">観戦中</span>}
+        <span className={`storm-meter ${view.hurricaneRevealed ? 'urgent' : view.weatherRemaining <= 3 ? 'warn' : ''}`}>{storm}</span>
         <span className="phase-name">{phaseLabel(view)}</span>
         {left !== null && <span className="timer">⏱ {left}s</span>}
       </div>
@@ -183,40 +228,70 @@ function Header({ view }: { view: PublicGameState }) {
   );
 }
 
+const PIP_CAP = 16; // 表示するコマ上限（超過分は ＋N で示す）
+
 function Tracks({ view }: { view: PublicGameState }) {
   const need = view.seatsNeeded;
   return (
     <div className="tracks">
-      <Track icon="🐟" label="食料" value={view.food} need={need} cap={view.foodCap} flyKey="food" />
-      <Track icon="💧" label="水" value={view.water} need={need} cap={view.waterCap} flyKey="water" />
-      <div className="track raft" data-fly="raft">
-        <div className="track-head">
-          <span>🛶 座席</span>
-          <strong className={view.raftSeats >= need ? 'ok' : 'short'}>{view.raftSeats} / {need}</strong>
-        </div>
-        <div className="raft-bar" title={`木 ${view.raftProgress}/${RAFT_LOOP}`}>
-          {Array.from({ length: RAFT_LOOP }).map((_, i) => (
-            <span key={i} className={`plank ${i < view.raftProgress ? 'on' : ''}`} />
-          ))}
-        </div>
-        <div className="hint-sm">木{RAFT_LOOP}で座席+1（最大{MAX_SEATS}）</div>
-      </div>
+      <ResourceTrack icon="🍖" label="食料" value={view.food} need={need} kind="food" flyKey="food" />
+      <ResourceTrack icon="💧" label="水" value={view.water} need={need} kind="water" flyKey="water" />
+      <RaftTrack view={view} need={need} />
     </div>
   );
 }
-function Track({ icon, label, value, need, cap, flyKey }: { icon: string; label: string; value: number; need: number; cap: number; flyKey?: string }) {
+
+/** 食料・水を「1つ1つのコマ」で表示：持っている数と必要数の過不足が一目で分かる。 */
+function ResourceTrack({ icon, label, value, need, kind, flyKey }: { icon: string; label: string; value: number; need: number; kind: 'food' | 'water'; flyKey: string }) {
   const short = value < need;
-  const pct = Math.max(0, Math.min(100, (value / Math.max(need, 1)) * 100));
+  const shown = Math.min(Math.max(value, need, 1), PIP_CAP);
+  const overflow = Math.max(0, value - PIP_CAP);
   return (
-    <div className="track" data-fly={flyKey}>
+    <div className={`track res ${kind} ${short ? 'is-short' : 'is-ok'}`} data-fly={flyKey}>
       <div className="track-head">
-        <span>{icon} {label}</span>
-        <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}<small> / 必要{need}</small></strong>
+        <span className="track-name">{icon} {label}</span>
+        <span className="track-count">
+          <strong key={value} className="num-pop">{value}</strong>
+          <small>必要{need}</small>
+        </span>
       </div>
-      <div className="gauge" title={`${value} / 必要${need}（上限${cap}）`}>
-        <div className={`gauge-fill ${short ? 'short' : 'ok'}`} style={{ width: `${pct}%` }} />
+      <div className="pips" role="img" aria-label={`${label} ${value}（必要${need}）`}>
+        {Array.from({ length: shown }, (_, i) => {
+          const state = i < value ? 'have' : i < need ? 'lack' : 'extra';
+          return <span key={i} className={`pip ${state}${i + 1 === need ? ' need-mark' : ''}`} />;
+        })}
+        {overflow > 0 && <span className="pip-more">＋{overflow}</span>}
       </div>
-      <div className="hint-sm">{short ? `あと${need - value}不足` : '充足'}・上限{cap}</div>
+      <div className="track-foot">{short ? `あと${need - value}足りない…` : '足りている'}</div>
+    </div>
+  );
+}
+
+/** いかだ＝乗れる人数。席を1つ1つのコマで、必要人数（生存者数）と対比して表示。 */
+function RaftTrack({ view, need }: { view: PublicGameState; need: number }) {
+  const seats = view.raftSeats;
+  const enough = seats >= need;
+  const shown = Math.min(Math.max(seats, need, 1), PIP_CAP);
+  return (
+    <div className={`track raft ${enough ? 'is-ok' : 'is-short'}`} data-fly="raft">
+      <div className="track-head">
+        <span className="track-name">🛶 いかだ</span>
+        <span className="track-count">
+          <strong key={seats}>{seats}</strong>
+          <small>必要{need}人</small>
+        </span>
+      </div>
+      <div className="pips" role="img" aria-label={`いかだの席 ${seats}（必要${need}人）`}>
+        {Array.from({ length: shown }, (_, i) => (
+          <span key={i} className={`pip seat ${i < seats ? 'have' : i < need ? 'lack' : 'extra'}${i + 1 === need ? ' need-mark' : ''}`} />
+        ))}
+      </div>
+      <div className="raft-progress" title={`次の席まで 木 ${view.raftProgress}/${RAFT_LOOP}`}>
+        <span className="rp-label">次の席まで</span>
+        <span className="rp-bar">
+          {Array.from({ length: RAFT_LOOP }, (_, i) => <span key={i} className={`rp-dot ${i < view.raftProgress ? 'on' : ''}`} />)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -247,6 +322,11 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
         {dead && <span className="badge death">死亡💀</span>}
         {p.sick && p.alive && <span className="badge sick">病気🐍</span>}
         {p.resting && p.alive && <span className="badge sick">休み💤</span>}
+        {(view.phase === 'survival' || view.phase === 'vote') && p.alive && !p.escaped && (
+          p.contributedThisRound
+            ? <span className="badge gave" title="このラウンド、共有プールへ供出した">供出✓</span>
+            : <span className="badge hold" title="このラウンド、何も供出していない">出し渋り</span>
+        )}
         {!myDraw && !dead && !p.escaped && isActor && view.phase === 'action' && <span className="badge actor">手番</span>}
         {!dead && !p.escaped && p.acted && view.phase === 'action' && <span className="badge done">✓</span>}
       </div>
@@ -266,7 +346,8 @@ function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) 
 
   switch (view.phase) {
     case 'action':
-      return <ActionPanel view={view} me={me} />;
+      // ラウンド/手番が変わるたび再マウントして woodPush スライダーを0へ戻す。
+      return <ActionPanel key={`${view.round}-${view.currentActorId}`} view={view} me={me} />;
     case 'survival':
       return <SurvivalPanel view={view} me={me} />;
     case 'vote':
@@ -285,23 +366,31 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
     const actor = view.players.find((p) => p.id === view.currentActorId);
     return <div className="panel"><h3>行動フェイズ</h3><p className="hint">{actor ? `${actor.name} の手番です…` : '進行中…'}</p></div>;
   }
+  const noRain = view.currentPrecip === 0;
   return (
     <div className="panel yourturn">
-      <h3>あなたの番です — 行動を選ぶ</h3>
+      <h3>🫵 あなたの番 — 行動を選ぶ</h3>
       <div className="action-grid">
-        <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}>{ACTION_LABEL.fish}<span className="sub">袋から1玉・魚1〜3（不漁あり）</span></button>
-        <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}>{ACTION_LABEL.water}<span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
-        <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}>{ACTION_LABEL.search}<span className="sub">カードを1枚引く</span></button>
-        <div className="btn action wood-action">
-          {ACTION_LABEL.wood}
-          <span className="sub">まず木1本（斧で2本）確定</span>
-          <div className="wood-push">
-            <label>さらに引く本数：{wood} 本（0〜5）<input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
-            <button className="btn primary small" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>{wood > 0 ? `確定：1本＋${wood}本引く` : '確定：木1本だけ取る'}</button>
-          </div>
-        </div>
+        <button className="act-tile fish" onClick={() => { playSound('fish'); api.choose('fish'); }}>
+          <span className="act-ic">🎣</span><span className="act-nm">釣り</span><span className="act-sub">魚 1〜3（不漁あり）</span>
+        </button>
+        <button className="act-tile water" disabled={noRain} onClick={() => { playSound('water'); api.choose('water'); }}>
+          <span className="act-ic">💧</span><span className="act-nm">水汲み</span><span className="act-sub">{noRain ? '今日は雨なし' : `水 +${view.currentPrecip}`}</span>
+        </button>
+        <button className="act-tile search" onClick={() => { playSound('search'); api.choose('search'); }}>
+          <span className="act-ic">🔍</span><span className="act-nm">難破船</span><span className="act-sub">カードを1枚引く</span>
+        </button>
+        <button className="act-tile wood" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>
+          <span className="act-ic">🪵</span><span className="act-nm">木集め</span>
+          <span className="act-sub">木1本{wood > 0 ? ` ＋追加${wood}本` : ''}を取る</span>
+          <span className="wood-stepper" onClick={(e) => e.stopPropagation()} role="group" aria-label="追加で引く本数">
+            <button type="button" aria-label="減らす" disabled={wood <= 0} onClick={() => setWood((w) => Math.max(0, w - 1))}>−</button>
+            <b>{wood}</b>
+            <button type="button" aria-label="増やす" disabled={wood >= 5} onClick={() => setWood((w) => Math.min(5, w + 1))}>＋</button>
+          </span>
+        </button>
       </div>
-      <p className="hint">🐍ヘビ（黒玉）に噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると病気で次ラウンド休み＆追加分は無し。釣りの黒玉は「不漁」で病気にはなりません。</p>
+      <p className="hint">🐍 噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると次ラウンド休み＆追加分は無し（釣りの黒玉は「不漁」で病気にはなりません）。</p>
     </div>
   );
 }
@@ -341,25 +430,39 @@ function VotePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   );
 }
 
-function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
+function EscapePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
+  if (me.escapeChoice !== undefined) {
+    return <div className="panel escape"><h3>出航の決断</h3><p className="hint">決定しました。他の生存者を待っています…</p></div>;
+  }
+  const capacity = Math.min(view.raftSeats, view.food, view.water);
+  const everyone = capacity >= view.seatsNeeded;
   return (
     <div className="panel escape">
-      <h3>脱出のチャンス！</h3>
-      <p>座席{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
+      <h3>{everyone ? '脱出のチャンス！' : '⚠ 抜け駆けの誘惑'}</h3>
+      {everyone ? (
+        <p>座席{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
+      ) : (
+        <p className="short">
+          筏は<strong>{capacity}人ぶん</strong>しかない（生存{view.seatsNeeded}人）。
+          全員は乗れない——出航すれば席を<strong>奪い合い</strong>、乗れた者だけ脱出（残席は島に残る）。
+          残れば次の便を待てるが、その保証はない。
+        </p>
+      )}
       <div className="panel-actions">
-        <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>まだ残る</button>
-        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>🛶 出航する！</button>
+        <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>島に残る</button>
+        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>🛶 {everyone ? '出航する！' : '抜け駆けして乗る'}</button>
       </div>
     </div>
   );
 }
 
 function Hand({ view, me, onSelect }: { view: PublicGameState; me: PublicPlayer; onSelect: (card: Card) => void }) {
+  void view;
   const hand = me.hand ?? [];
   if (hand.length === 0) return null;
   return (
-    <div className="hand">
-      <span className="hand-label">手札（タップで効果と使い方）</span>
+    <div className="hand-dock" aria-label="あなたの手札">
+      <div className="hand-dock-label">🎴 手札 {hand.length} <small>タップで使う／渡す</small></div>
       <div className="hand-cards">
         {hand.map((c) => {
           const info = CARD_INFO[c.kind];
@@ -411,10 +514,15 @@ function ItemModal({
   me: PublicPlayer;
   card: Card;
   onClose: () => void;
-  onUse: (card: Card, mode: 'gun' | 'voodoo' | null) => void;
+  onUse: (card: Card, mode: TargetMode | null) => void;
 }) {
   const info = CARD_INFO[card.kind];
   const u = cardUsable(view, me, card);
+  // 指名贈与：資源/単発/無用品カードを、自分の手番か生存ウィンドウで相手に渡せる。
+  const giftable =
+    (info.cat === 'resource' || info.cat === 'single' || info.cat === 'junk') &&
+    ((view.phase === 'action' && view.isYourTurn) || view.phase === 'survival') &&
+    view.players.some((p) => p.alive && !p.escaped && !p.isYou);
   const use = () => {
     if (!u.ok) return;
     if (card.kind === 'gun') return onUse(card, 'gun');
@@ -431,8 +539,12 @@ function ItemModal({
         <p className="item-desc">{info.desc}</p>
         <p className="hint">カードを使っても、このターンの行動（釣り・水汲み・木集め・探索）は別に行えます。</p>
         {!u.ok && u.reason && <p className="short">{u.reason}</p>}
+        {giftable && <p className="hint">🎁 このカードは仲間に「渡す」こともできます（貸し借り・取引・恩売り）。</p>}
         <div className="panel-actions">
           <button className="btn ghost" onClick={onClose}>やめる</button>
+          {giftable && (
+            <button className="btn" onClick={() => onUse(card, 'gift')}>🎁 渡す（相手を選ぶ）</button>
+          )}
           <button className="btn primary" disabled={!u.ok} onClick={use}>
             {card.kind === 'gun' || card.kind === 'voodoo' ? '使う（相手を選ぶ）' : '使う'}
           </button>
@@ -504,6 +616,44 @@ function Chat({ view, chat, onSay }: { view: PublicGameState; chat: ChatMessage[
   );
 }
 
+/** 漂着の導入：ゲーム開始（第1ラウンド）の一度だけ「無人島に漂着した」を見せる。 */
+function IntroSplash({ view }: { view: PublicGameState }) {
+  const [show, setShow] = useState(false);
+  const done = useRef(false);
+  useEffect(() => {
+    if (done.current || view.phase === 'lobby' || view.phase === 'gameover' || view.round !== 1) return;
+    done.current = true;
+    setShow(true);
+    const id = window.setTimeout(() => setShow(false), 4600);
+    return () => window.clearTimeout(id);
+  }, [view.round, view.phase]);
+  if (!show) return null;
+  return (
+    <div className="intro" onClick={() => setShow(false)}>
+      <div className="intro-card">
+        <svg className="intro-scene" viewBox="0 0 220 110" aria-hidden>
+          <defs>
+            <radialGradient id="isun" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#ffe7a8" /><stop offset="100%" stopColor="#ff9f43" /></radialGradient>
+            <linearGradient id="isea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#1d6e84" /><stop offset="100%" stopColor="#0a2e39" /></linearGradient>
+          </defs>
+          <circle cx="170" cy="34" r="20" fill="url(#isun)" opacity="0.92" />
+          <rect x="0" y="66" width="220" height="44" fill="url(#isea)" />
+          <path d="M0 72 q28 -7 56 0 t56 0 t56 0 t56 0 V110 H0 Z" fill="#11505f" opacity="0.7" />
+          <ellipse cx="84" cy="78" rx="40" ry="10" fill="#d9be84" />
+          <path d="M84 78 q-3 -22 -12 -28 q15 5 12 28" fill="#3f8f5f" />
+          <rect x="82" y="54" width="4" height="24" rx="2" fill="#7c4f2e" />
+          <g transform="translate(150 84)"><rect x="0" y="0" width="26" height="5" rx="2" fill="#7c4f2e" /><rect x="11" y="-14" width="2.5" height="14" fill="#9c6b3e" /><path d="M13.5 -14 L26 -7 L13.5 -4 Z" fill="#eae0cf" /></g>
+        </svg>
+        <h2>無人島に漂着した</h2>
+        <p>嵐に流され、見知らぬ島へ。<br />次の嵐が来る前に、<strong>いかだ</strong>を造って脱出せよ。</p>
+        <p className="intro-warn">だが水も食料も足りない——いつか、誰かを犠牲にする日が来る。</p>
+        <span className="intro-skip">タップで始める ▸</span>
+      </div>
+    </div>
+  );
+}
+
+/** ラウンド開始の天候お披露目：「今日の天気は〇〇」＋その日の水汲み量。 */
 function RoundSplash({ view }: { view: PublicGameState }) {
   const [show, setShow] = useState(false);
   const ref = useRef(0);
@@ -512,38 +662,38 @@ function RoundSplash({ view }: { view: PublicGameState }) {
     if (view.round === ref.current) return;
     ref.current = view.round;
     setShow(true);
-    const id = window.setTimeout(() => setShow(false), 1100);
+    const id = window.setTimeout(() => setShow(false), view.round === 1 ? 0 : 1800);
     return () => window.clearTimeout(id);
   }, [view.round, view.phase]);
-  if (!show) return null;
+  if (!show || view.round === 1) return null; // 第1ラウンドは IntroSplash に任せる
+  const effect = view.hurricaneRevealed
+    ? '⚠ 今ラウンド終了時に必ず脱出！'
+    : view.currentPrecip > 0
+      ? `水汲みで 水 +${view.currentPrecip}`
+      : '今日は雨なし — 水は汲めない';
   return (
     <div className="day-splash">
-      <div className="day-splash-inner">
-        <span className="ds-day">{view.round}ラウンド</span>
-        <span className="ds-weather">{weatherLabel(view)}</span>
-        {view.hurricaneRevealed && <span className="ds-storm">ハリケーン！</span>}
+      <div className={`day-splash-inner ${view.hurricaneRevealed ? 'storm' : ''}`}>
+        <span className="ds-round">第{view.round}ラウンド</span>
+        <span className="ds-weather-line">今日の天気は <span className="ds-weather">{weatherLabel(view)}</span></span>
+        <span className="ds-effect">{effect}</span>
       </div>
     </div>
   );
 }
 
-/** 天候の常時エフェクト：雨が降る／晴れの陽射し／嵐の稲妻＋豪雨。 */
+/** 天候の常時アンビエンス：見にくい斜線の雨は廃し、穏やかな色味と嵐の稲妻だけに。 */
 function WeatherFX({ view }: { view: PublicGameState }) {
   if (view.phase === 'lobby' || view.phase === 'gameover') return null;
   if (view.hurricaneRevealed) {
     return (
       <div className="wfx wfx-storm" aria-hidden>
-        <div className="wfx-rain heavy" />
         <div className="wfx-light" />
       </div>
     );
   }
   if (view.currentPrecip > 0) {
-    return (
-      <div className="wfx" aria-hidden>
-        <div className={`wfx-rain p${Math.min(3, view.currentPrecip)}`} />
-      </div>
-    );
+    return <div className={`wfx wfx-rain-soft p${Math.min(3, view.currentPrecip)}`} aria-hidden />;
   }
   return <div className="wfx wfx-sun" aria-hidden />;
 }
@@ -655,7 +805,7 @@ function EventFX({ view }: { view: PublicGameState }) {
   );
 }
 
-function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPlayer; onLeave: () => void }) {
+function GameOver({ view, me, onLeave, onRematch }: { view: PublicGameState; me?: PublicPlayer; onLeave: () => void; onRematch: () => void }) {
   const escaped = view.players.filter((p) => p.escaped);
   const dead = view.players.filter((p) => !p.alive && !p.escaped);
   const sole = view.config.soleSurvivor;
@@ -679,7 +829,12 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
           <div><h4>島に消えた（{dead.length}）</h4><ul>{dead.map((p) => line(p, '💀'))}{dead.length === 0 && <li className="hint">なし</li>}</ul></div>
         </div>
         <p className="hint">（カッコ内はAIの正体＝性格）</p>
-        <button className="btn primary" onClick={onLeave}>新しいゲームへ</button>
+        <div className="panel-actions">
+          {!view.isSpectator && me && view.hostId === me.id && (
+            <button className="btn primary" onClick={onRematch}>🔁 同じ顔ぶれでもう1戦</button>
+          )}
+          <button className="btn" onClick={onLeave}>新しいゲームへ</button>
+        </div>
       </div>
     </div>
   );

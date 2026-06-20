@@ -5,7 +5,8 @@ services:
   - type: web
     name: hellapagos
     runtime: node
-    plan: free
+    # 永続ディスクで戦績を保持するため starter 以上を推奨（free はディスク揮発＝再デプロイで戦績が消える）。
+    plan: starter
     region: oregon
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start -w @hellapagos/server
@@ -14,5 +15,20 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20.11.0"
-    # 無料プランはディスクが揮発するため、再デプロイでランキングはリセットされる。
-    # 永続化する場合は有料 Disk を /opt/render/project/src/packages/server/data にマウント。
+      - key: NODE_ENV
+        value: production
+      # 単一オリジン配信なら未設定で「同一オリジンのみ許可」（安全側）。
+      # 別ドメインのクライアントから接続するときだけ実ドメインを設定する（'*' は使わない）。
+      - key: CLIENT_ORIGIN
+        sync: false
+      # 戦績JSONの保存先（永続ディスクのマウント先）。
+      - key: LEADERBOARD_DIR
+        value: /var/data
+      # CPUの会話をClaudeで生成する場合のみ設定（未設定ならスクリプト交渉へ自動フォールバック）。
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    # 永続ディスク：戦績を再デプロイ後も保持。free プランでは利用不可。
+    disk:
+      name: hellapagos-data
+      mountPath: /var/data
+      sizeGB: 1

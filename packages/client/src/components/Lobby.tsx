@@ -69,6 +69,18 @@ export function Lobby({ view, onLeave }: Props) {
           </span>
         </label>
 
+        <label className={`mode-row ${isHost ? '' : 'readonly'}`}>
+          <input
+            type="checkbox"
+            checked={view.config.quickGame}
+            disabled={!isHost}
+            onChange={(e) => api.setConfig({ quickGame: e.target.checked })}
+          />
+          <span>
+            <strong>短期決戦</strong>：天候デッキを縮め、ハリケーンが早く来る（手早く決着）
+          </span>
+        </label>
+
         <div className="config-row">
           <label>
             CPU難易度

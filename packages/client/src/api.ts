@@ -10,15 +10,19 @@ export async function fetchLeaderboard(limit = 20): Promise<LeaderboardEntry[]> 
 export const api = {
   createRoom: (name: string) => new Promise<Ack>((r) => socket.emit('room:create', { name }, r)),
   joinRoom: (roomId: string, name: string) => new Promise<Ack>((r) => socket.emit('room:join', { roomId, name }, r)),
-  rejoin: (roomId: string, playerId: string) => new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId }, r)),
+  quickStart: (name: string, bots = 2) => new Promise<Ack>((r) => socket.emit('game:quickStart', { name, bots }, r)),
+  rejoin: (roomId: string, playerId: string, token?: string) =>
+    new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId, token }, r)),
   leaveRoom: () => socket.emit('room:leave'),
   addBot: () => socket.emit('room:addBot'),
   removeBot: (botId: string) => socket.emit('room:removeBot', { botId }),
-  setConfig: (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) =>
+  setConfig: (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number; quickGame?: boolean }) =>
     socket.emit('game:setConfig', p),
   start: () => socket.emit('game:start'),
+  rematch: () => socket.emit('game:rematch'),
   choose: (action: ActionType, woodPush = 0) => socket.emit('action:choose', { action, woodPush }),
   playCard: (cardId: string, targetId?: string | null) => socket.emit('card:play', { cardId, targetId }),
+  gift: (cardId: string, targetId: string) => socket.emit('card:gift', { cardId, targetId }),
   survivalPass: () => socket.emit('survival:pass'),
   vote: (targetId: string | null) => socket.emit('vote:cast', { targetId }),
   escapeVote: (leave: boolean) => socket.emit('escape:vote', { leave }),
@@ -30,6 +34,8 @@ export interface Session {
   roomId: string;
   playerId: string;
   name: string;
+  /** 再接続認証トークン（サーバ発行・本人のみ保持） */
+  token?: string;
 }
 export function loadSession(): Session | null {
   try {

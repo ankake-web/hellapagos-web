@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.11.0"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck（shared / server / client）
+        run: npm run typecheck
+      - name: Test（共有エンジン 39 件）
+        run: npm test
+      - name: Build（クライアント本番ビルド）
+        run: npm run build
+      # Lint/format は任意（Biome を devDependency に追加したら下を有効化）:
+      # - name: Lint
+      #   run: npx @biomejs/biome check .

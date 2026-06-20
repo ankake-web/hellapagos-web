@@ -17,7 +17,8 @@ export function App() {
   const [connected, setConnected] = useState(socket.connected);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [stats, setStats] = useState<Stats>(() => loadStats());
-  const [recordedRoom, setRecordedRoom] = useState<string | null>(null);
+  // 戦績の重複排除キー（ルームID＋シード）。rematch はシードが変わるので試合ごとに別キーになる。
+  const [recordedGame, setRecordedGame] = useState<string | null>(null);
   const [muted, setMuted] = useState(() => isMuted());
   const [showConnBanner, setShowConnBanner] = useState(false);
   const sfx = useRef({ logId: -1, phase: '', weather: '', gameoverDone: false });
@@ -48,11 +49,13 @@ export function App() {
     if (saved) {
       setSession(saved);
       const doRejoin = () =>
-        api.rejoin(saved.roomId, saved.playerId).then((res) => {
+        api.rejoin(saved.roomId, saved.playerId, saved.token).then((res) => {
           if (!res.ok) {
             clearSession();
             setSession(null);
             setView(null);
+            setError(res.error || 'セッションが切れました。もう一度始めてください。');
+            window.setTimeout(() => setError(null), 4000);
           }
         });
       if (socket.connected) doRejoin();
@@ -126,20 +129,22 @@ export function App() {
   useEffect(() => {
     if (!view || !session) return;
     if (view.phase !== 'gameover' || view.isSpectator) return;
-    if (recordedRoom === session.roomId) return;
+    const gameKey = `${session.roomId}|${view.config.seed}`;
+    if (recordedGame === gameKey) return; // この試合は記録済み
     const me = view.players.find((p) => p.isYou);
     if (!me) return;
     const totalEscaped = view.players.filter((p) => p.escaped).length;
     const escaped = !!me.escaped;
-    const won = view.config.soleSurvivor ? escaped && totalEscaped === 1 : escaped;
-    setStats(recordResult({ escaped, won }));
-    setRecordedRoom(session.roomId);
-  }, [view, session, recordedRoom]);
+    const sole = view.config.soleSurvivor;
+    const won = sole ? escaped && totalEscaped === 1 : escaped;
+    setStats(recordResult({ escaped, won, sole }));
+    setRecordedGame(gameKey);
+  }, [view, session, recordedGame]);
 
   const handleCreate = async (name: string) => {
     const res = await api.createRoom(name);
     if (res.ok) {
-      const s = { roomId: res.roomId, playerId: res.playerId, name };
+      const s = { roomId: res.roomId, playerId: res.playerId, name, token: res.token };
       saveSession(s);
       setSession(s);
     } else {
@@ -150,12 +155,33 @@ export function App() {
   const handleJoin = async (roomId: string, name: string) => {
     const res = await api.joinRoom(roomId, name);
     if (res.ok) {
-      const s = { roomId: res.roomId, playerId: res.playerId, name };
+      const s = { roomId: res.roomId, playerId: res.playerId, name, token: res.token };
       saveSession(s);
       setSession(s);
     } else {
       setError(res.error);
     }
+  };
+
+  // ひとりで今すぐ：ルーム作成→CPU補充→即開始を1クリックで。
+  const handleQuickStart = async (name: string) => {
+    const res = await api.quickStart(name);
+    if (res.ok) {
+      const s = { roomId: res.roomId, playerId: res.playerId, name, token: res.token };
+      saveSession(s);
+      setSession(s);
+    } else {
+      setError(res.error);
+    }
+  };
+
+  // 同じ顔ぶれでもう1戦。記録キーはシード込みなので試合が変われば自動で別キーになる
+  // （ここで recordedGame をリセットすると gameover のままの view で再記録が走り二重計上になるため触らない）。
+  const handleRematch = () => {
+    api.rematch();
+    setChat([]);
+    sfx.current = { logId: -1, phase: '', weather: '', gameoverDone: false };
+    chatLen.current = 0;
   };
 
   const leave = () => {
@@ -164,7 +190,7 @@ export function App() {
     setSession(null);
     setView(null);
     setChat([]);
-    setRecordedRoom(null);
+    setRecordedGame(null);
     sfx.current = { logId: -1, phase: '', weather: '', gameoverDone: false };
     chatLen.current = 0;
     window.history.replaceState({}, '', window.location.pathname);
@@ -172,11 +198,11 @@ export function App() {
 
   let screen;
   if (!session || !view) {
-    screen = <Home onCreate={handleCreate} onJoin={handleJoin} stats={stats} />;
+    screen = <Home onCreate={handleCreate} onJoin={handleJoin} onQuickStart={handleQuickStart} stats={stats} />;
   } else if (view.phase === 'lobby') {
     screen = <Lobby view={view} onLeave={leave} />;
   } else {
-    screen = <Board view={view} chat={chat} onSay={api.say} onLeave={leave} />;
+    screen = <Board view={view} chat={chat} onSay={api.say} onLeave={leave} onRematch={handleRematch} />;
   }
 
   return (

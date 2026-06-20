@@ -14,6 +14,7 @@ import {
   aiEscape,
   aiSurvivalPlays,
   aiVote,
+  aliveCount,
   alivePlayers,
   randomName,
   scriptedNegotiation,
@@ -21,6 +22,7 @@ import {
   castVote,
   createGame,
   currentActorId,
+  giftCard,
   isEscapeReady,
   isSurvivalReady,
   isVoteReady,
@@ -60,10 +62,15 @@ interface ServerRoom {
   chatSeq: number;
   botCounter: number;
   recorded: boolean;
+  // 再接続認証：playerId/specId -> 秘密トークン。state には絶対載せない（リダクションで配らない）。
+  tokens: Map<string, string>;
+  // ルームGC：最終アクティビティ時刻
+  lastActiveAt: number;
   // 進行制御
   botTimer?: ReturnType<typeof setTimeout>;
   deadline?: ReturnType<typeof setTimeout>;
   deadlineAt?: number;
+  deadlineKey?: string; // 締切が張られたフェイズの識別子（stale発火の防止）
   survivalKey?: string; // ラウンド毎の生存ウィンドウ初期化済みマーカー
   voteKey?: string; // 投票ラウンド毎のボット投票・煽り済みマーカー
   // LLM交渉
@@ -79,6 +86,12 @@ interface ServerRoom {
 
 // 劇的イベント後の演出ホールド（ミリ秒）。速度設定に依らず必ず見えるよう固定。
 const DRAMA_HOLD_MS = 2400;
+// 締切なし設定でも、この時間で必ずフェイズを前進させる（AFK人間でのデッドロック防止）。
+const HARD_CAP_MS = 5 * 60_000;
+/** 締切の有効性照合用キー：フェイズが進んだら stale 締切を無効化するために使う。 */
+function phaseKey(s: GameState): string {
+  return `${s.phase}|${s.round}|${s.voteReason ?? ''}|${s.pendingEliminations}|${s.currentActorIndex}`;
+}
 /** 直近の「劇的」ログ（蛇・死亡・脱出・ハリケーン）のid。無ければ -1。 */
 function latestDramaId(s: GameState): number {
   let id = -1;
@@ -118,13 +131,50 @@ function rngFor(s: GameState, salt: number): Rng {
   return new Rng(s.rngState + s.round * 131 + salt * 17 + 1);
 }
 
+// ルームGC：gameover到達後や無人のまま放置されたルームを掃除する閾値。
+const ROOM_GC_INTERVAL_MS = 60_000;
+const ROOM_GAMEOVER_TTL_MS = 5 * 60_000; // 決着後5分でクローズ
+const ROOM_IDLE_TTL_MS = 30 * 60_000; // ソケット0かつ無活動30分でクローズ
+
 export class RoomManager {
   private rooms = new Map<string, ServerRoom>();
   private socketIndex = new Map<string, { roomId: string; playerId: string }>();
-  constructor(private io: IO) {}
+  private gcTimer: ReturnType<typeof setInterval>;
+  constructor(private io: IO) {
+    this.gcTimer = setInterval(() => this.reap(), ROOM_GC_INTERVAL_MS);
+    // Node が GC タイマーでプロセスを引き止めないように（あれば）。
+    (this.gcTimer as { unref?: () => void }).unref?.();
+  }
+
+  /** 決着済み/無人で放置されたルームを定期的にクローズしてメモリリークを防ぐ。 */
+  private reap(): void {
+    const now = Date.now();
+    for (const room of [...this.rooms.values()]) {
+      const idleFor = now - room.lastActiveAt;
+      const noSockets = room.sockets.size === 0;
+      // 接続中の卓は回収しない（gameover でも、結果画面を見ている/再戦しようとしているホストを守る）。
+      if (room.state.phase === 'gameover' && noSockets && idleFor > ROOM_GAMEOVER_TTL_MS) {
+        this.closeRoom(room);
+      } else if (noSockets && idleFor > ROOM_IDLE_TTL_MS) {
+        this.closeRoom(room);
+      }
+    }
+  }
+
+  /** グレースフルシャットダウン用：GCタイマーと全ルームのタイマーを停止。 */
+  dispose(): void {
+    clearInterval(this.gcTimer);
+    for (const room of this.rooms.values()) this.clearTimers(room);
+  }
+
+  private mintToken(room: ServerRoom, id: string): string {
+    const token = genId(24);
+    room.tokens.set(id, token);
+    return token;
+  }
 
   // ===== ロビー =====
-  createRoom(name: string, socketId: string): { roomId: string; playerId: string } {
+  createRoom(name: string, socketId: string): { roomId: string; playerId: string; token: string } {
     let roomId = genRoomId();
     while (this.rooms.has(roomId)) roomId = genRoomId();
     const playerId = genId(8);
@@ -138,38 +188,49 @@ export class RoomManager {
       chatSeq: 0,
       botCounter: 0,
       recorded: false,
+      tokens: new Map(),
+      lastActiveAt: Date.now(),
       botVoteIntent: new Map(),
       negotiateUntil: 0,
       lastReplyAt: 0,
     };
+    const token = this.mintToken(room, playerId);
     this.rooms.set(roomId, room);
     this.socketIndex.set(socketId, { roomId, playerId });
     this.broadcast(room);
-    return { roomId, playerId };
+    return { roomId, playerId, token };
   }
 
-  joinRoom(roomId: string, name: string, socketId: string): { playerId: string; spectator: boolean } {
+  joinRoom(roomId: string, name: string, socketId: string): { playerId: string; spectator: boolean; token: string } {
     const room = this.requireRoom(roomId);
     if (room.state.phase !== 'lobby' || room.state.players.length >= MAX_PLAYERS) {
       const specId = 'spec_' + genId(8);
       room.spectators.set(specId, clean(name));
       room.sockets.set(specId, socketId);
+      const token = this.mintToken(room, specId);
       this.socketIndex.set(socketId, { roomId, playerId: specId });
+      this.touch(room);
       this.sendStateTo(room, specId, socketId);
       this.sendChatHistory(room, socketId);
-      return { playerId: specId, spectator: true };
+      return { playerId: specId, spectator: true, token };
     }
     const playerId = genId(8);
     room.state = addPlayer(room.state, { id: playerId, name: clean(name), isBot: false });
     room.sockets.set(playerId, socketId);
+    const token = this.mintToken(room, playerId);
     this.socketIndex.set(socketId, { roomId, playerId });
     this.sendChatHistory(room, socketId);
     this.broadcast(room);
-    return { playerId, spectator: false };
+    return { playerId, spectator: false, token };
   }
 
-  rejoin(roomId: string, playerId: string, socketId: string): void {
+  rejoin(roomId: string, playerId: string, token: string | undefined, socketId: string): void {
     const room = this.requireRoom(roomId);
+    // 認証：発行済みトークンと一致しない再接続は拒否（席乗っ取り・秘匿手札の覗き見対策）。
+    const expected = room.tokens.get(playerId);
+    if (!expected || token !== expected) {
+      throw new GameError('BAD_TOKEN', 'セッションが無効です。トップへ戻ってやり直してください。');
+    }
     if (room.state.players.some((p) => p.id === playerId)) {
       room.state = setConnected(room.state, playerId, true);
       room.sockets.set(playerId, socketId);
@@ -178,6 +239,7 @@ export class RoomManager {
       room.sockets.set(playerId, socketId);
     }
     this.socketIndex.set(socketId, { roomId, playerId });
+    this.touch(room);
     this.sendChatHistory(room, socketId);
     this.broadcast(room);
   }
@@ -185,7 +247,11 @@ export class RoomManager {
   addBot(socketId: string): void {
     const { room, playerId } = this.ctx(socketId);
     this.assertHost(room, playerId);
-    if (room.state.phase !== 'lobby' || room.state.players.length >= MAX_PLAYERS) return;
+    if (this.addBotTo(room)) this.broadcast(room);
+  }
+  /** ルームへCPUを1体追加（ホスト判定はしない）。追加できたら true。 */
+  private addBotTo(room: ServerRoom): boolean {
+    if (room.state.phase !== 'lobby' || room.state.players.length >= MAX_PLAYERS) return false;
     const seedArr = new Uint32Array(1);
     globalThis.crypto.getRandomValues(seedArr);
     const used = new Set(room.state.players.map((p) => p.name));
@@ -193,6 +259,40 @@ export class RoomManager {
     const persona = BOT_PERSONAS[room.botCounter % BOT_PERSONAS.length] as BotPersona;
     room.botCounter++;
     room.state = addPlayer(room.state, { id: 'bot_' + genId(6), name, isBot: true, botPersona: persona });
+    return true;
+  }
+
+  /** ひとりで今すぐ：ルーム作成→CPU補充→即開始を1発で行う。 */
+  quickStart(name: string, socketId: string, bots: number): { roomId: string; playerId: string; token: string } {
+    const created = this.createRoom(name, socketId);
+    const room = this.rooms.get(created.roomId);
+    if (!room) return created;
+    for (let i = 0; i < bots && room.state.players.length < MAX_PLAYERS; i++) this.addBotTo(room);
+    if (room.state.players.length >= MIN_PLAYERS) {
+      room.state = startGame(room.state);
+      this.drive(room);
+    } else {
+      this.broadcast(room);
+    }
+    return created;
+  }
+
+  /** 同じ顔ぶれでもう1戦：構成（人間・CPU・設定）を保ったままロビーへ戻す。 */
+  rematch(socketId: string): void {
+    const { room, playerId } = this.ctx(socketId);
+    this.assertHost(room, playerId);
+    if (room.state.phase !== 'gameover') return;
+    const seedArr = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(seedArr);
+    const players = room.state.players.map((p) => ({ id: p.id, name: p.name, isBot: p.isBot, botPersona: p.botPersona }));
+    const cfg = { ...room.state.config, seed: seedArr[0] || 1 };
+    this.clearTimers(room);
+    room.state = createGame(players, cfg);
+    room.recorded = false;
+    room.survivalKey = undefined;
+    room.voteKey = undefined;
+    room.lastDramaId = undefined;
+    room.holdUntil = undefined;
     this.broadcast(room);
   }
   removeBot(socketId: string, botId: string): void {
@@ -203,7 +303,7 @@ export class RoomManager {
       this.broadcast(room);
     }
   }
-  setRoomConfig(socketId: string, p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }): void {
+  setRoomConfig(socketId: string, p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number; quickGame?: boolean }): void {
     const { room, playerId } = this.ctx(socketId);
     this.assertHost(room, playerId);
     room.state = setConfig(room.state, p);
@@ -228,6 +328,11 @@ export class RoomManager {
   submitCard(socketId: string, cardId: string, targetId?: string | null): void {
     const { room, playerId } = this.ctx(socketId);
     room.state = playCard(room.state, playerId, cardId, targetId ?? undefined);
+    this.drive(room);
+  }
+  submitGift(socketId: string, cardId: string, targetId: string): void {
+    const { room, playerId } = this.ctx(socketId);
+    room.state = giftCard(room.state, playerId, cardId, targetId);
     this.drive(room);
   }
   submitSurvivalPass(socketId: string): void {
@@ -276,7 +381,20 @@ export class RoomManager {
   }
 
   // ===== 進行エンジン（ターン制＋逐次CPU） =====
+  /** drive 本体を例外で包む：1つの不正遷移でプロセス全体を落とさない。 */
   private drive(room: ServerRoom): void {
+    try {
+      this.driveInner(room);
+    } catch (err) {
+      console.error('[room] drive failed', room.id, err);
+      try {
+        this.broadcast(room);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  private driveInner(room: ServerRoom): void {
     let guard = 0;
     while (guard++ < 4000) {
       const s = room.state;
@@ -428,33 +546,72 @@ export class RoomManager {
     const delay = lo + Math.floor(r.next() * (hi - lo));
     room.botTimer = setTimeout(() => {
       room.botTimer = undefined;
-      const bot = this.live(room, botId);
-      if (!bot || currentActorId(room.state) !== botId) {
-        this.drive(room);
-        return;
-      }
-      const decision = aiAction(room.state, bot, rngFor(room.state, botId.length));
-      // たまにセリフ
-      if (bot.botPersona && r.chance(0.25)) {
-        const line = aiChatLine(bot, r);
-        if (line) this.postChat(room, bot.name, line, false);
-      }
-      room.state = takeAction(room.state, botId, decision.action, decision.woodPush);
-      // 噛まれたら血清で治す（手番を失わないため）
-      const after = this.live(room, botId);
-      if (after?.sick) {
-        const serum = after.hand.find((c) => c.kind === 'serum');
-        if (serum) room.state = playCard(room.state, botId, serum.id);
+      try {
+        const bot = this.live(room, botId);
+        if (bot && currentActorId(room.state) === botId) {
+          // 手番開始時のアイテム活用（蘇生・睡眠薬・目覚まし時計）。手番は消費しない。
+          this.botUseItems(room, botId, r);
+          const actor = this.live(room, botId);
+          if (actor && currentActorId(room.state) === botId) {
+            const decision = aiAction(room.state, actor, rngFor(room.state, botId.length));
+            // たまにセリフ
+            if (actor.botPersona && r.chance(0.25)) {
+              const line = aiChatLine(actor, r);
+              if (line) this.postChat(room, actor.name, line, false);
+            }
+            room.state = takeAction(room.state, botId, decision.action, decision.woodPush);
+            // 噛まれたら血清で治す（手番を失わないため）
+            const after = this.live(room, botId);
+            if (after?.sick) {
+              const serum = after.hand.find((c) => c.kind === 'serum');
+              if (serum) room.state = playCard(room.state, botId, serum.id);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[room] bot action failed', room.id, err);
       }
       this.drive(room);
     }, delay);
   }
 
-  private botTaunt(room: ServerRoom): void {
-    for (const p of alivePlayers(room.state).filter((x) => x.isBot && !x.sick)) {
-      const r = rngFor(room.state, p.id.charCodeAt(0) + 3);
-      const line = aiChatLine(p, r);
-      if (line) this.postChat(room, p.name, line, false);
+  /** 手番開始時：性格に応じて単発アイテムを使う（蘇生・睡眠薬・目覚まし時計）。手番は消費しない。 */
+  private botUseItems(room: ServerRoom, botId: string, r: Rng): void {
+    const bot = this.live(room, botId);
+    if (!bot || room.state.phase !== 'action' || bot.sick || bot.resting) return;
+    const persona = bot.botPersona ?? 'cooperative';
+    const others = alivePlayers(room.state).filter((p) => p.id !== botId);
+
+    // ブードゥー人形：生存者が危機的に少ないとき、協力的/臆病者が死者を蘇らせ全滅を防ぐ。
+    const voodoo = bot.hand.find((c) => c.kind === 'voodoo');
+    if (voodoo && (persona === 'cooperative' || persona === 'coward') && aliveCount(room.state) <= 2) {
+      const dead = room.state.players.find((p) => !p.alive && !p.escaped);
+      if (dead && r.chance(0.7)) {
+        room.state = playCard(room.state, botId, voodoo.id, dead.id);
+        return; // 1ターンに1アイテムまで
+      }
+    }
+
+    // 睡眠薬：手札が薄く裕福な相手がいるとき、溜め込み屋/狙撃手/臆病者が奪う。
+    const pills = bot.hand.find((c) => c.kind === 'sleeping_pills');
+    const richest = [...others].sort((a, b) => b.hand.length - a.hand.length)[0];
+    if (
+      pills &&
+      (persona === 'hoarder' || persona === 'sniper' || persona === 'coward') &&
+      richest &&
+      richest.hand.length >= 3 &&
+      bot.hand.length <= 3 &&
+      r.chance(0.5)
+    ) {
+      room.state = playCard(room.state, botId, pills.id);
+      return;
+    }
+
+    // 目覚まし時計：たまに使って親を別の誰かへ回す（場を動かす演出）。
+    const alarm = bot.hand.find((c) => c.kind === 'alarm_clock');
+    if (alarm && others.length > 0 && r.chance(0.2)) {
+      const target = r.pick(others);
+      room.state = playCard(room.state, botId, alarm.id, target.id);
     }
   }
 
@@ -548,11 +705,11 @@ export class RoomManager {
   }
 
   private matchPlayerByName(room: ServerRoom, name: string, exceptId: string): string | null {
+    // 厳密一致のみ採用（双方向 includes は誤爆＆プロンプトインジェクションでの誤投票誘発を招くため不可）。
     const norm = (s: string) => s.replace(/\s/g, '').toLowerCase();
     const n = norm(name);
-    const hit = alivePlayers(room.state).find(
-      (p) => p.id !== exceptId && (norm(p.name) === n || norm(p.name).includes(n) || n.includes(norm(p.name))),
-    );
+    if (!n) return null;
+    const hit = alivePlayers(room.state).find((p) => p.id !== exceptId && norm(p.name) === n);
     return hit?.id ?? null;
   }
 
@@ -564,7 +721,7 @@ export class RoomManager {
     const info = PERSONA_INFO[persona];
     const handKinds = me.hand.map((c) => CARD_INFO[c.kind].name);
     const players = alivePlayers(s)
-      .map((p) => `${p.name}(手札${p.hand.length}${p.sick ? '/病' : ''}${p.isBot ? '' : '/人間'})`)
+      .map((p) => `${p.name}(手札${p.hand.length}${p.sick ? '/病' : ''}${p.contributedThisRound === false ? '/出し渋り' : ''}${p.isBot ? '' : '/人間'})`)
       .join('、');
     const candidates = alivePlayers(s)
       .filter((p) => p.id !== botId)
@@ -590,19 +747,31 @@ export class RoomManager {
   private ensureDeadline(room: ServerRoom, phase: string, onFire?: () => void): void {
     if (room.deadline) return;
     const limit = room.state.config.timeLimit;
-    if (!limit || limit <= 0) {
-      room.deadlineAt = undefined; // 無制限：締切なし（人間が好きなだけ考えられる）
-      return;
-    }
-    const ms = limit * 1000;
-    room.deadlineAt = Date.now() + ms;
+    const unlimited = !limit || limit <= 0;
+    // 無制限でも「絶対上限」を必ず張る：AFKの人間で当該フェイズが永久停止するのを防ぐ。
+    const ms = unlimited ? HARD_CAP_MS : limit * 1000;
+    // 無制限のときは UI に締切を見せない（人間は好きなだけ考えられる、でも最大HARD_CAPで前進）。
+    room.deadlineAt = unlimited ? undefined : Date.now() + ms;
+    const key = phaseKey(room.state);
+    room.deadlineKey = key;
     room.deadline = setTimeout(() => {
       room.deadline = undefined;
       room.deadlineAt = undefined;
-      if (onFire) onFire();
-      else if (room.state.phase === 'action') {
-        const actorId = currentActorId(room.state);
-        if (actorId) room.state = takeAction(room.state, actorId, 'fish', 0);
+      // stale: タイマー設定後にフェイズが進んでいたら、その締切は無効。再評価だけする。
+      if (room.deadlineKey !== key || phaseKey(room.state) !== key) {
+        room.deadlineKey = undefined;
+        this.drive(room);
+        return;
+      }
+      room.deadlineKey = undefined;
+      try {
+        if (onFire) onFire();
+        else if (room.state.phase === 'action') {
+          const actorId = currentActorId(room.state);
+          if (actorId) room.state = takeAction(room.state, actorId, 'fish', 0);
+        }
+      } catch (err) {
+        console.error('[room] deadline onFire failed', room.id, err);
       }
       this.drive(room);
     }, ms);
@@ -615,6 +784,7 @@ export class RoomManager {
     room.botTimer = undefined;
     room.deadline = undefined;
     room.deadlineAt = undefined;
+    room.deadlineKey = undefined;
     room.negTimer = undefined;
     room.holdTimer = undefined;
   }
@@ -630,6 +800,7 @@ export class RoomManager {
     if (player && !player.isBot) this.maybeBotReply(room);
   }
   private postChat(room: ServerRoom, name: string, text: string, isSpectator: boolean): void {
+    this.touch(room); // 結果画面でのチャットも「活動」とみなし、GCのTTLを延ばす
     const msg: ChatMessage = { id: room.chatSeq++, name, text, isSpectator, round: room.state.round };
     room.chat.push(msg);
     if (room.chat.length > CHAT_HISTORY) room.chat.splice(0, room.chat.length - CHAT_HISTORY);
@@ -637,7 +808,11 @@ export class RoomManager {
   }
 
   // ===== 出力 =====
+  private touch(room: ServerRoom): void {
+    room.lastActiveAt = Date.now();
+  }
   private broadcast(room: ServerRoom): void {
+    this.touch(room);
     for (const [viewerId, socketId] of room.sockets) this.sendStateTo(room, viewerId, socketId);
   }
   private sendStateTo(room: ServerRoom, viewerId: string, socketId: string): void {
@@ -651,6 +826,10 @@ export class RoomManager {
   private closeRoom(room: ServerRoom): void {
     this.clearTimers(room);
     this.rooms.delete(room.id);
+    // このルームを指す socketIndex の残骸も掃除（GC で消えた卓への参照を残さない）。
+    for (const [sid, idx] of this.socketIndex) {
+      if (idx.roomId === room.id) this.socketIndex.delete(sid);
+    }
   }
   private recordIfGameOver(room: ServerRoom): void {
     if (room.state.phase !== 'gameover' || room.recorded) return;

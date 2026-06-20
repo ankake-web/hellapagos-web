@@ -2,23 +2,36 @@
 app = "hellapagos-change-me"
 primary_region = "nrt" # 東京。最寄りのリージョンに変更可
 
+# 進行中ゲームはメモリ上にあるため、再デプロイ/停止時はグレースフルに閉じる猶予を取る。
+kill_timeout = "5s"
+
 [build]
 # Dockerfile を自動使用
+
+[env]
+  NODE_ENV = "production"
+  # 戦績JSONの保存先（下の [mounts] と一致させる）。
+  LEADERBOARD_DIR = "/data"
+  # CLIENT_ORIGIN は単一オリジン配信なら未設定でOK（同一オリジンのみ許可）。
+  # 別ドメインから接続するときだけ `fly secrets set CLIENT_ORIGIN=https://example.com`。
+  # ANTHROPIC_API_KEY は使う場合のみ `fly secrets set ANTHROPIC_API_KEY=...`。
 
 [http_service]
   internal_port = 8787
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  # 進行中ゲームはメモリ常駐のため、ライブ運用では最低1台を常時稼働させ、
+  # アイドル自動停止で対戦中の卓が消えるのを防ぐ（コスト最優先なら 0 に戻してよい）。
+  min_machines_running = 1
   # WebSocket(Socket.IO) は http_service 経由で wss として透過される
 
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
 
-# ランキングを永続化する場合は Volume を作成しマウントする：
+# 戦績を永続化する Volume（再デプロイ後も保持）。事前に作成：
 #   fly volumes create hellapagos_data --size 1 --region nrt
-# [mounts]
-#   source = "hellapagos_data"
-#   destination = "/app/packages/server/data"
+[mounts]
+  source = "hellapagos_data"
+  destination = "/data"

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NAME_POOL } from '@hellapagos/shared';
-import type { Stats } from '../stats.js';
+import { earnedBadges, type Stats } from '../stats.js';
 import { Rules } from './Rules.js';
 import { Leaderboard } from './Leaderboard.js';
 
@@ -11,10 +11,11 @@ function suggestName(): string {
 interface Props {
   onCreate: (name: string) => void;
   onJoin: (roomId: string, name: string) => void;
+  onQuickStart: (name: string) => void;
   stats: Stats;
 }
 
-export function Home({ onCreate, onJoin, stats }: Props) {
+export function Home({ onCreate, onJoin, onQuickStart, stats }: Props) {
   const urlRoom = new URLSearchParams(window.location.search).get('room') ?? '';
   const [name, setName] = useState(suggestName);
   const [roomId, setRoomId] = useState(urlRoom.replace(/\D/g, '').slice(0, 4));
@@ -84,8 +85,11 @@ export function Home({ onCreate, onJoin, stats }: Props) {
           </div>
         </label>
 
-        <button className="btn primary" disabled={!trimmed} onClick={() => onCreate(trimmed)}>
-          ルームを作る
+        <button className="btn primary" disabled={!trimmed} onClick={() => onQuickStart(trimmed)}>
+          ▶ ひとりで今すぐ遊ぶ
+        </button>
+        <button className="btn" disabled={!trimmed} onClick={() => onCreate(trimmed)}>
+          友達とルームを作る
         </button>
 
         <div className="divider">または</div>
@@ -127,6 +131,16 @@ export function Home({ onCreate, onJoin, stats }: Props) {
             </span>
           </div>
         )}
+        {(() => {
+          const badges = earnedBadges(stats);
+          return badges.length > 0 ? (
+            <div className="badges" aria-label="獲得した実績バッジ">
+              {badges.map((b) => (
+                <span key={b.label} className="badge-chip" title={b.desc}>{b.icon} {b.label}</span>
+              ))}
+            </div>
+          ) : null;
+        })()}
       </div>
 
       {showRules && <Rules onClose={() => setShowRules(false)} />}
