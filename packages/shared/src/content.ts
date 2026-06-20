@@ -11,7 +11,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   soleSurvivor: false,
   difficulty: 'normal',
   speed: 'normal',
-  timeLimit: 120, // 既定2分。初心者向け。0で無制限
+  timeLimit: 0, // 既定は無制限（じっくり考えられる）。ロビーで制限時間を設定可。
   quickGame: false,
   seed: 1,
 };
