@@ -152,7 +152,8 @@ export class RoomManager {
     for (const room of [...this.rooms.values()]) {
       const idleFor = now - room.lastActiveAt;
       const noSockets = room.sockets.size === 0;
-      if (room.state.phase === 'gameover' && idleFor > ROOM_GAMEOVER_TTL_MS) {
+      // 接続中の卓は回収しない（gameover でも、結果画面を見ている/再戦しようとしているホストを守る）。
+      if (room.state.phase === 'gameover' && noSockets && idleFor > ROOM_GAMEOVER_TTL_MS) {
         this.closeRoom(room);
       } else if (noSockets && idleFor > ROOM_IDLE_TTL_MS) {
         this.closeRoom(room);
@@ -799,6 +800,7 @@ export class RoomManager {
     if (player && !player.isBot) this.maybeBotReply(room);
   }
   private postChat(room: ServerRoom, name: string, text: string, isSpectator: boolean): void {
+    this.touch(room); // 結果画面でのチャットも「活動」とみなし、GCのTTLを延ばす
     const msg: ChatMessage = { id: room.chatSeq++, name, text, isSpectator, round: room.state.round };
     room.chat.push(msg);
     if (room.chat.length > CHAT_HISTORY) room.chat.splice(0, room.chat.length - CHAT_HISTORY);
@@ -824,6 +826,10 @@ export class RoomManager {
   private closeRoom(room: ServerRoom): void {
     this.clearTimers(room);
     this.rooms.delete(room.id);
+    // このルームを指す socketIndex の残骸も掃除（GC で消えた卓への参照を残さない）。
+    for (const [sid, idx] of this.socketIndex) {
+      if (idx.roomId === room.id) this.socketIndex.delete(sid);
+    }
   }
   private recordIfGameOver(room: ServerRoom): void {
     if (room.state.phase !== 'gameover' || room.recorded) return;
