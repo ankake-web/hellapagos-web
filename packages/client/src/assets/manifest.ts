@@ -22,3 +22,14 @@ for (const [path, url] of Object.entries(bgs)) {
   const key = path.split('/').pop()!.replace(/\.(png|jpe?g|webp)$/, '');
   BG_ART[key] = url;
 }
+
+// その他の挿絵（リザルトの大絵・主人公の肖像など）。./art/<key>.* を置くと使われる。
+// 想定キー: you（主人公）, res-survived（自分が脱出）, res-died（自分が死亡）,
+//          res-all-survived（全員脱出）, res-all-dead（全滅）。
+const arts = import.meta.glob('./art/*.{png,jpg,jpeg,webp}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+
+export const ART: Record<string, string> = {};
+for (const [path, url] of Object.entries(arts)) {
+  const key = path.split('/').pop()!.replace(/\.(png|jpe?g|webp)$/, '');
+  ART[key] = url;
+}

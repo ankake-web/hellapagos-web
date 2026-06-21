@@ -3,6 +3,7 @@ import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPl
 import { CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
 import { GameIcon } from '../assets/icons.js';
+import { ART } from '../assets/manifest.js';
 import { playSound } from '../sound.js';
 
 interface Props {
@@ -263,7 +264,8 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
   return (
     <div className={`pcard ${dead ? 'dead' : ''} ${p.escaped ? 'escaped' : ''} ${isActor ? 'actor' : ''} ${targetable ? 'targetable' : ''}`} data-pid={p.id} onClick={targetable ? onPick : undefined}>
       <div className="pcard-top">
-        <span className="pname">{p.isBot ? '🤖' : '🧍'} {p.name}</span>
+        {p.isYou && ART['you'] ? <img className="pc-avatar" src={ART['you']} alt="" /> : <span className="pc-face">{p.isBot ? '🤖' : '🧍'}</span>}
+        <span className="pname">{p.name}</span>
         {p.id === view.hostId && <span className="tag host">主</span>}
         {p.isYou && <span className="tag you">自</span>}
       </div>
@@ -686,9 +688,20 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
   const line = (p: PublicPlayer, icon: string) => (
     <li key={p.id}>{icon} {p.name}{p.persona && <span className="reveal">（{PERSONA_INFO[p.persona].label}）</span>}</li>
   );
+  // 結末の大きな挿絵（全員脱出/全滅、または自分の生死）。未提供のキーは近い絵にフォールバック。
+  const allEscaped = escaped.length > 0 && dead.length === 0;
+  const allDead = escaped.length === 0;
+  const artKey = allEscaped ? 'res-all-survived'
+    : allDead ? 'res-all-dead'
+    : view.isSpectator ? (escaped.length > 0 ? 'res-all-survived' : 'res-all-dead')
+    : me?.escaped ? 'res-survived' : 'res-died';
+  const artUrl = ART[artKey]
+    ?? (artKey === 'res-died' ? ART['res-all-dead'] : undefined)
+    ?? (artKey === 'res-survived' ? ART['res-all-survived'] : undefined);
   return (
     <div className="overlay">
       <div className={`result ${view.isSpectator ? '' : youWon ? 'win' : 'lose'}`}>
+        {artUrl && <img className="result-art" src={artUrl} alt="" />}
         <h2>{headline}</h2>
         {sole && <span className="tag spectate">ソロサバイバル</span>}
         {!view.isSpectator && verdict && <p className={`verdict ${youWon ? 'win' : 'lose'}`}>{verdict}</p>}
