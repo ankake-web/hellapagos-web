@@ -3,6 +3,22 @@
 ヘルパゴス Web版は **単一オリジン構成**（Express + Socket.IO のサーバが、ビルド済みクライアントも同じドメインで配信）です。
 そのため Node を常時稼働できるホスト1つにデプロイすれば動きます。WebSocket(Socket.IO) が使えるサービスを選んでください。
 
+## 推奨: フロントは GitHub Pages（CDN）＋ サーバは Render（カタン/ドミニオンと同じ構成）
+
+単一オリジン構成だと、ページ本体まで Render の無料 Node サーバ1台が配信するため、
+リロードのたびに **コールドスタート＋CDN無しのオリジン往復**で数秒かかる。
+フロントを **GitHub Pages（静的CDN）** に分離すると、ページ読み込みはエッジから即座になり、
+Render は **オンライン対戦の Socket.IO 専用**になる（対戦開始時だけ接続）。
+
+- `.github/workflows/deploy.yml` が `main` への push でクライアントをビルドし Pages へ配信する。
+- ビルド時に `VITE_BASE=/hellapagos-web/`（サブパス配信）を注入（`packages/client/vite.config.ts`）。
+- リポジトリ変数 `VITE_SERVER_URL = https://<app>.onrender.com` を
+  Settings → Secrets and variables → Actions → Variables に登録すると、
+  Pages のページが Render の対戦サーバへ接続する（`packages/client/src/socket.ts`）。
+- Render サーバ側は `CLIENT_ORIGIN` を未設定（=`*` 全許可）にするか、`https://<user>.github.io` を許可する。
+- 公開URL: `https://<user>.github.io/hellapagos-web/`
+- 既存の単一オリジン版（下記）はそのまま併用可能（フォールバック）。
+
 ## 仕組み
 
 - `npm run build` で `packages/client/dist` を生成。

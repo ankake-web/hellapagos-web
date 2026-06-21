@@ -1,0 +1,69 @@
+name: Deploy to GitHub Pages
+
+# クライアント（フロント）を GitHub Pages（静的CDN）へ配信する。
+# 狙い: ページの読み込み／リロードを CDN エッジから即座にする
+#       （Render の無料 Node サーバはオンライン対戦の Socket.IO 専用にする）。
+# main に push されるたび、または手動実行で動く。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GitHub Pages デプロイ（OIDC）に必要な権限。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時に走るデプロイは1つに絞る（進行中はキャンセルしない）。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build client
+        run: npm run build
+        env:
+          # GitHub Pages はリポジトリ名のサブパス配信なので base を合わせる。
+          VITE_BASE: /hellapagos-web/
+          # オンライン対戦サーバ（Render）の接続先。
+          # リポジトリの Settings → Secrets and variables → Actions → Variables に
+          #   VITE_SERVER_URL = https://<app>.onrender.com
+          # を登録すると焼き込まれ、Pages のページから対戦サーバへ接続できる。
+          # 未設定なら同一オリジン接続のまま（Pages からのオンライン対戦は無効）。
+          VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # モノレポなのでクライアントのビルド成果物を指す。
+          path: ./packages/client/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
