@@ -12,6 +12,7 @@ import {
   aiAction,
   aiChatLine,
   aiEscape,
+  aiPermanentPlays,
   aiSurvivalPlays,
   aiVote,
   alivePlayers,
@@ -434,11 +435,14 @@ export class RoomManager {
     const delay = lo + Math.floor(r.next() * (hi - lo));
     room.botTimer = setTimeout(() => {
       room.botTimer = undefined;
-      const bot = this.live(room, botId);
+      let bot = this.live(room, botId);
       if (!bot || currentActorId(room.state) !== botId) {
         this.drive(room);
         return;
       }
+      // 受動の永続は「発動」して初めて効果が出る → 持っていれば先に発動する
+      for (const id of aiPermanentPlays(bot)) room.state = playCard(room.state, botId, id);
+      bot = this.live(room, botId)!;
       const decision = aiAction(room.state, bot, rngFor(room.state, botId.length));
       // たまにセリフ
       if (bot.botPersona && r.chance(0.25)) {

@@ -64,6 +64,8 @@ export interface Player {
   hand: Card[];
   /** その投票での対象 id（null=棄権、未投票=undefined） */
   vote?: string | null;
+  /** その投票で資源カードを自分に使って身を守った（追放を免れる）。投票ごとにリセット */
+  voteSafe?: boolean;
   /** 脱出フェイズの賛否（未回答=undefined） */
   escapeChoice?: boolean;
   /** 直近の投票で集めた票（表示用） */

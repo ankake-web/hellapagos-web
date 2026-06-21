@@ -1,7 +1,14 @@
 import { difficultyParams } from './content.js';
 import { aliveCount, hasPermanent } from './engine.js';
 import { Rng } from './rng.js';
-import type { ActionType, BotPersona, Difficulty, GameState, Player } from './types.js';
+import type { ActionType, BotPersona, CardKind, Difficulty, GameState, Player } from './types.js';
+
+const PASSIVE_PERMS: readonly CardKind[] = ['axe', 'fishing_rod', 'canteen', 'crystal_ball'];
+/** 受動の永続は所持しているだけでは無効になったので、CPUは手番で即「発動」する。
+ *  発動すべきカードIDの配列を返す（呼び出し側が playCard で順に適用）。 */
+export function aiPermanentPlays(p: Player): string[] {
+  return p.hand.filter((c) => PASSIVE_PERMS.includes(c.kind) && !p.revealed.includes(c.kind)).map((c) => c.id);
+}
 
 /**
  * CPUの意思決定。サーバ側で完全な GameState と当該 Player を渡して使う純粋関数。

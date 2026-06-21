@@ -10,6 +10,7 @@ import {
   aiAction,
   aiChatLine,
   aiEscape,
+  aiPermanentPlays,
   aiSurvivalPlays,
   aiVote,
   alivePlayers,
@@ -332,11 +333,14 @@ export class LocalRunner {
     this.botTimer = setTimeout(() => {
       this.botTimer = undefined;
       if (this.disposed) return;
-      const bot = this.live(botId);
+      let bot = this.live(botId);
       if (!bot || currentActorId(this.state) !== botId) {
         this.drive();
         return;
       }
+      // 受動の永続は「発動」して初めて効果が出る → 持っていれば先に発動する
+      for (const id of aiPermanentPlays(bot)) this.state = playCard(this.state, botId, id);
+      bot = this.live(botId)!;
       const decision = aiAction(this.state, bot, rngFor(this.state, botId.length));
       if (bot.botPersona && r.chance(0.25)) {
         const line = aiChatLine(bot, r);

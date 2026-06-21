@@ -433,11 +433,18 @@ function cardUsable(view: PublicGameState, me: PublicPlayer, c: Card): { ok: boo
   const phase = view.phase;
   const cat = CARD_INFO[k].cat;
   if (me.sick && k !== 'serum') return { ok: false, reason: '病気の間はカードを使えません（血清を除く）。' };
-  if (cat === 'permanent' && k !== 'gun') return { ok: false, reason: '持っているだけで自動的に効果が出る永続カードです。' };
-  if (cat === 'junk') return { ok: false, reason: '効果はありません（交換やブラフ用）。' };
+  if (cat === 'permanent' && k !== 'gun')
+    return phase === 'action'
+      ? { ok: true }
+      : { ok: false, reason: '自分の手番（行動フェイズ）で使うと発動し、以後ずっと効果が続きます。' };
+  if (cat === 'junk')
+    return phase === 'action'
+      ? { ok: true }
+      : { ok: false, reason: '効果はありませんが、行動フェイズで手放せます（はったり）。' };
   if (k === 'bullet') return { ok: false, reason: '銃と一緒に使います（単体では使えません）。' };
   if (cat === 'resource') {
-    return phase === 'survival' || phase === 'action' || phase === 'vote'
+    if (phase === 'vote') return { ok: true };
+    return phase === 'survival' || phase === 'action'
       ? { ok: true }
       : { ok: false, reason: 'いまは使えません（行動/生存/投票フェイズで）。' };
   }
@@ -481,7 +488,13 @@ function ItemModal({
         <div className={`item-ic cat-${info.cat}`}><GameIcon name={card.kind} size={56} fallback={info.icon} /></div>
         <h3>{info.name}</h3>
         <p className="item-desc">{info.desc}</p>
-        <p className="hint">カードを使っても、このターンの行動（釣り・水汲み・木集め・探索）は別に行えます。</p>
+        {view.phase === 'vote' && info.cat === 'resource' && u.ok ? (
+          <p className="hint">今この投票で使うと、<strong>自分だけ</strong>追放を免れます（みんなの蓄えには入りません）。</p>
+        ) : info.cat === 'permanent' && card.kind !== 'gun' ? (
+          <p className="hint">使うと<strong>発動して公開</strong>され、以後ずっと効果が続きます。</p>
+        ) : (
+          <p className="hint">カードを使っても、このターンの行動（釣り・水汲み・木集め・探索）は別に行えます。</p>
+        )}
         {!u.ok && u.reason && <p className="short">{u.reason}</p>}
         <div className="panel-actions">
           <button className="btn ghost" onClick={onClose}>やめる</button>

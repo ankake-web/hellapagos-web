@@ -40,10 +40,11 @@ function find(s: GameState, id: string): Player | undefined {
 function hasCard(p: Player, kind: CardKind): boolean {
   return p.hand.some((c) => c.kind === kind);
 }
+/** 永続カードは「使用(発動)」して revealed に入って初めて効果を持つ（所持だけでは無効）。 */
 export function hasPermanent(p: Player, kind: CardKind): boolean {
-  return hasCard(p, kind);
+  return (p.revealed ?? []).includes(kind);
 }
-/** 永続カードを「使用済み（公開）」として記録（使うまで他者には伏せられる）。 */
+/** 永続カードを「使用済み（公開）」として記録（銃など、手札に残すもの用）。 */
 function reveal(p: Player, kind: CardKind): void {
   if (hasCard(p, kind) && !p.revealed.includes(kind)) p.revealed.push(kind);
 }
@@ -268,7 +269,6 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
       } else {
         const gain = ball.fish * (hasPermanent(p, 'fishing_rod') ? 2 : 1);
         d.food = clampSupply(d.food + gain);
-        if (hasPermanent(p, 'fishing_rod')) reveal(p, 'fishing_rod');
         d.lastDraw = { playerId, balls: [ball], action };
         recordGain(d, playerId, 'food', gain);
         pushLog(d, `${p.name} は釣り：魚 ${ball.fish}${hasPermanent(p, 'fishing_rod') ? '×2' : ''} で食料 +${gain}。`, 'good', playerId);
@@ -282,7 +282,6 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
         pushLog(d, `${p.name} は水汲み：雨がなく汲めなかった。`, 'info', playerId);
       } else {
         d.water = clampSupply(d.water + gain);
-        if (mult > 1) reveal(p, 'canteen');
         recordGain(d, playerId, 'water', gain);
         pushLog(d, `${p.name} は水汲み：水 +${gain}（降水量${d.currentPrecip}${mult > 1 ? '×2' : ''}）。`, 'good', playerId);
       }
@@ -290,7 +289,6 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
     }
     case 'wood': {
       const base = 1 + (hasPermanent(p, 'axe') ? 1 : 0);
-      if (hasPermanent(p, 'axe')) reveal(p, 'axe');
       addWood(d, base);
       let gained = base;
       const push = Math.max(0, Math.min(5, Math.floor(woodPush)));
@@ -423,6 +421,7 @@ function eligibleVoters(d: GameState): Player[] {
 function startVote(d: GameState): GameState {
   for (const p of d.players) {
     p.vote = undefined;
+    p.voteSafe = false; // 各投票ごとに自己救済の保護はリセット
     (p as { votesReceived?: number }).votesReceived = undefined;
   }
   d.phase = 'vote';
@@ -439,7 +438,6 @@ export function castVote(s: GameState, playerId: string, targetId: string | null
     if (t && t.alive && !t.escaped && t.id !== playerId) valid = targetId;
   }
   voter.vote = valid;
-  if (hasCard(voter, 'crystal_ball')) reveal(voter, 'crystal_ball');
   return d;
 }
 export function isVoteReady(s: GameState): boolean {
@@ -477,10 +475,14 @@ export function resolveVote(s: GameState): GameState {
     return afterVoteBatch(d);
   }
 
-  // 該当資源カードで自己救済（自分の配給として消費・プールには入らない）
+  // 自己救済：投票中に自分へ資源カードを使って保護済みなら追放を免れる（プールには入らない）。
+  // 明示的に使っていなくても、該当資源を持っていれば自動でしのぐ（従来挙動のフォールバック）。
   const reason = d.voteReason;
   const saveKind = reason === 'water' ? resourceWaterCard(victim) : resourceFoodCard(victim);
-  if (saveKind) {
+  if (victim.voteSafe) {
+    pushLog(d, `${victim.name} は配給を切って身を守り、追放を免れた。`, 'card', victim.id);
+    d.pendingEliminations -= 1;
+  } else if (saveKind) {
     consumeCardForSelf(victim, saveKind);
     pushLog(d, `${victim.name} は${cardName(saveKind)}を切り、追放を免れた。`, 'card', victim.id);
     d.pendingEliminations -= 1;
@@ -604,9 +606,8 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
   if (!card) return s;
   // 病気中はカード不可（自己救済は自動処理のため除外）
   if (p0.sick && card.kind !== 'serum') return s;
-  // 永続/無用品/弾単体は能動プレイ無効
-  if (PERMANENT_KINDS.has(card.kind) && card.kind !== 'gun') return s;
-  if (card.kind === 'junk' || card.kind === 'bullet') return s;
+  // 弾は単体では使えない（銃と併用）
+  if (card.kind === 'bullet') return s;
 
   const d = clone(s);
   const p = find(d, playerId)!;
@@ -620,8 +621,40 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
     case 'rotten_fish':
     case 'fruit_basket': {
       if (d.phase !== 'survival' && d.phase !== 'action' && d.phase !== 'vote') return s;
-      applyResourceCard(d, p, c.kind);
-      pushLog(d, `${p.name} は ${cardName(c.kind)} を使った。`, 'card', playerId);
+      if (d.phase === 'vote') {
+        // 投票中：自分の配給として消費し「自分だけ」追放を免れる（プールには入れない）。
+        // 救えるのは投票理由に合う資源のみ（水不足→水カード／食料不足・ハリケーン→食料カード）。
+        const reason = d.voteReason;
+        const water = c.kind === 'water_bottle' || c.kind === 'dirty_water';
+        const food = c.kind === 'sandwich' || c.kind === 'sardine_can' || c.kind === 'rotten_fish';
+        const matches = reason === 'water' ? water : food; // food/hurricane は食料カード
+        if (!matches) return s;
+        consumeCardForSelf(p, c.kind);
+        p.voteSafe = true;
+        pushLog(d, `${p.name} は ${cardName(c.kind)} を自分の配給にして身を守った。`, 'card', playerId);
+      } else {
+        applyResourceCard(d, p, c.kind);
+        pushLog(d, `${p.name} は ${cardName(c.kind)} を使った（みんなの蓄えに加えた）。`, 'card', playerId);
+      }
+      break;
+    }
+    case 'canteen':
+    case 'fishing_rod':
+    case 'axe':
+    case 'crystal_ball': {
+      // 受動の永続：使って初めて効果が発動し、公開される（以後ずっと有効）。
+      if (d.phase !== 'action') return s;
+      if (p.revealed.includes(c.kind)) return s;
+      p.revealed.push(c.kind);
+      removeOneCard(p, c.kind);
+      pushLog(d, `${p.name} は ${permName(c.kind)} を使った（以後ずっと効果が続く）。`, 'card', playerId);
+      break;
+    }
+    case 'junk': {
+      // 無用品：効果は無いが「使った（手放した）」ことにできる＝はったり。
+      if (d.phase !== 'action') return s;
+      removeOneCard(p, 'junk');
+      pushLog(d, `${p.name} は無用品を手放した（はったり）。`, 'card', playerId);
       break;
     }
     case 'serum': {
@@ -711,6 +744,16 @@ function cardName(kind: CardKind): string {
     sardine_can: 'イワシ缶',
     rotten_fish: '腐った魚',
     fruit_basket: 'フルーツバスケット',
+  };
+  return map[kind] ?? kind;
+}
+function permName(kind: CardKind): string {
+  const map: Partial<Record<CardKind, string>> = {
+    canteen: '水筒',
+    fishing_rod: '釣り竿',
+    axe: '斧',
+    crystal_ball: '水晶玉',
+    gun: '銃',
   };
   return map[kind] ?? kind;
 }

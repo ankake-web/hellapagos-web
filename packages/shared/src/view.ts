@@ -1,16 +1,14 @@
-import { PERMANENT_KINDS, RESOURCE_CAP } from './content.js';
+import { RESOURCE_CAP } from './content.js';
 import { aliveCount, canEscapeAll, currentActorId } from './engine.js';
-import type { CardKind, GameState, PublicGameState, PublicPlayer } from './types.js';
+import type { GameState, PublicGameState, PublicPlayer } from './types.js';
 
 export function redactFor(s: GameState, viewerId: string, hostId: string): PublicGameState {
   const over = s.phase === 'gameover';
   const actorId = currentActorId(s);
   const players: PublicPlayer[] = s.players.map((p) => {
     const isYou = p.id === viewerId;
-    // 永続カードは「使うまで」他者に伏せる。本人は自分の所持を常に見える。
-    const heldPerms = p.hand.filter((c) => PERMANENT_KINDS.has(c.kind)).map((c) => c.kind as CardKind);
-    const revealed = p.revealed ?? [];
-    const permanents = isYou ? heldPerms : heldPerms.filter((k) => revealed.includes(k));
+    // 永続カードは「使って（発動して）初めて」場に公開される。未使用の永続は本人の手札にあるだけ。
+    const permanents = [...(p.revealed ?? [])];
     return {
       id: p.id,
       name: p.name,

@@ -129,23 +129,23 @@ export const RESOURCE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>([
 ]);
 
 export const CARD_INFO: Record<CardKind, { icon: string; name: string; desc: string; cat: 'resource' | 'single' | 'permanent' | 'junk' }> = {
-  water_bottle: { icon: '💧', name: '水ボトル', desc: '水+1', cat: 'resource' },
-  dirty_water: { icon: '🥤', name: '汚れた水', desc: '水+1だが病気1ターン', cat: 'resource' },
-  sandwich: { icon: '🥪', name: 'サンドイッチ', desc: '食料+1', cat: 'resource' },
-  sardine_can: { icon: '🥫', name: 'イワシ缶', desc: '食料+3', cat: 'resource' },
-  rotten_fish: { icon: '🐟', name: '腐った魚', desc: '食料+1だが病気1ターン', cat: 'resource' },
+  water_bottle: { icon: '💧', name: '水ボトル', desc: '水+1。投票中は自分に使って身を守れる', cat: 'resource' },
+  dirty_water: { icon: '🥤', name: '汚れた水', desc: '水+1だが病気1ターン。投票中は自衛に使える', cat: 'resource' },
+  sandwich: { icon: '🥪', name: 'サンドイッチ', desc: '食料+1。投票中は自分に使って身を守れる', cat: 'resource' },
+  sardine_can: { icon: '🥫', name: 'イワシ缶', desc: '食料+3。投票中は自分に使って身を守れる', cat: 'resource' },
+  rotten_fish: { icon: '🐟', name: '腐った魚', desc: '食料+1だが病気1ターン。投票中は自衛に使える', cat: 'resource' },
   fruit_basket: { icon: '🧺', name: 'フルーツバスケット', desc: '不足時に誰も死なず両カウンターを0に（脱出補給は不可）', cat: 'resource' },
   serum: { icon: '💉', name: '血清', desc: 'ヘビ毒を治す（その木集めの木は失う）', cat: 'single' },
   voodoo: { icon: '🪆', name: 'ブードゥー人形', desc: 'ターン開始時に死者1人を蘇生', cat: 'single' },
   sleeping_pills: { icon: '💊', name: '睡眠薬', desc: '異なる3人から各1枚ランダムに奪う', cat: 'single' },
   alarm_clock: { icon: '⏰', name: '目覚まし時計', desc: '次の親を選ぶ', cat: 'single' },
-  canteen: { icon: '🚰', name: '水筒', desc: '水汲み×2（永続）', cat: 'permanent' },
-  fishing_rod: { icon: '🎣', name: '釣り竿', desc: '魚×2（永続）', cat: 'permanent' },
-  axe: { icon: '🪓', name: '斧', desc: '木集め+1（永続）', cat: 'permanent' },
-  crystal_ball: { icon: '🔮', name: '水晶玉', desc: '各投票で最後に投票（永続）', cat: 'permanent' },
-  gun: { icon: '🔫', name: '銃', desc: '弾があれば他者を排除（永続・脱落でも回収）', cat: 'permanent' },
+  canteen: { icon: '🚰', name: '水筒', desc: '使うと発動：以後ずっと水汲み×2（公開される）', cat: 'permanent' },
+  fishing_rod: { icon: '🎣', name: '釣り竿', desc: '使うと発動：以後ずっと魚×2（公開される）', cat: 'permanent' },
+  axe: { icon: '🪓', name: '斧', desc: '使うと発動：以後ずっと木集め+1（公開される）', cat: 'permanent' },
+  crystal_ball: { icon: '🔮', name: '水晶玉', desc: '使うと発動・公開される永続カード', cat: 'permanent' },
+  gun: { icon: '🔫', name: '銃', desc: '弾があれば他者を排除（使うと公開・脱落でも回収）', cat: 'permanent' },
   bullet: { icon: '💥', name: '弾', desc: '銃と併用・使用後失う', cat: 'permanent' },
-  junk: { icon: '🗑️', name: '無用品', desc: '効果なし（ブラフ用）', cat: 'junk' },
+  junk: { icon: '🗑️', name: '無用品', desc: '効果なし。手放して「使った」ふりができる（はったり）', cat: 'junk' },
 };
 
 // ===== CPU 性格・難易度のチューニング =====
