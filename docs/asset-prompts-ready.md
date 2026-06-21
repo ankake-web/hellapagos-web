@@ -127,6 +127,52 @@ STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal 
 
 ---
 
+# 1b. 追加カード（基本セット・7種）　→ `src/assets/cards/`
+
+### 保存名: `coconut.png`
+```
+SUBJECT: a whole brown hairy coconut, three dark germination pores, a couple of fibrous texture lines.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+### 保存名: `conch.png`
+```
+SUBJECT: a spiral conch sea shell, pale pink and sandy cream, a pointed tip and a glossy opening.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+### 保存名: `club.png`
+```
+SUBJECT: a thick crude wooden club / cudgel, a bulbous knotted head and a narrow handle, a couple of knots.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+### 保存名: `tin_sheet.png`
+```
+SUBJECT: a battered square sheet of corrugated galvanized tin metal with vertical ridges and a few rivets, used as a makeshift shield.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+### 保存名: `matches.png`
+```
+SUBJECT: a single lit wooden match — cream stick, red match head, a small warm flame on top.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+### 保存名: `telescope.png`
+```
+SUBJECT: an old brass pirate spyglass / collapsible telescope, three segmented tubes, shown at a slight diagonal.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+### 保存名: `cannibal_bbq.png`
+```
+SUBJECT: a small makeshift round barbecue grill on three legs, a grill grate with warm orange flames poking up, a skewer of dark meat — grim survival improvisation, not gory.
+STYLE: hand-drawn watercolor with fine ink linework, weathered nautical journal / antique sea-chart aesthetic. Warm dusk palette — teal (#1d5a6e), deep ocean blue (#0e3a47), sandy beige (#ecdcae), sunset amber (#ffd479), burnt orange (#ff9f43), weathered wood brown (#8a5a34). Soft paper grain, loose washes, delicate ink outlines, gentle hand-painted shading. Single centered subject, ~12% padding, bold readable silhouette that works small, slightly bright and saturated so it reads on a dark teal UI. Isolated on a fully transparent background, soft drop shadow only. Square 512x512. No text, no border, no frame, no UI, no background scenery.
+```
+
+---
+
 # 2. 盤面グリフ（6種・任意）　→ `src/assets/cards/`
 
 ### 保存名: `fish.png`
