@@ -10,7 +10,9 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start -w @hellapagos/server
     healthCheckPath: /health
-    autoDeploy: false
+    # main への push で対戦サーバ（共有エンジン）も自動再デプロイする。
+    # ダッシュボードでこのサービスの Auto-Deploy も On にすること（Blueprint未管理の場合は dashboard 側が優先）。
+    autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: "20.11.0"
