@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPlayer } from '@hellapagos/shared';
 import { CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
+import { GameIcon } from '../assets/icons.js';
 import { playSound } from '../sound.js';
 
 interface Props {
@@ -12,11 +13,13 @@ interface Props {
 }
 
 const ACTION_LABEL: Record<ActionType, string> = {
-  fish: '🎣 釣り',
-  water: '💧 水汲み',
-  wood: '🪵 木集め',
-  search: '🔍 難破船',
+  fish: '釣り',
+  water: '水汲み',
+  wood: '木集め',
+  search: '難破船',
 };
+// 行動ボタンのアイコン（icons.tsx のSVGキー）
+const ACTION_ICON: Record<ActionType, string> = { fish: 'fish', water: 'water', wood: 'wood', search: 'search' };
 const KIND_CLASS: Record<string, string> = {
   good: 'good',
   bad: 'bad',
@@ -73,7 +76,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
       <FlyLayer view={view} />
       {targeting && (
         <div className="banner target">
-          {CARD_INFO[targeting.card.kind].icon} {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
+          <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} /> {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
           <button className="btn ghost small" onClick={() => setTargeting(null)}>キャンセル</button>
         </div>
       )}
@@ -192,11 +195,11 @@ function Tracks({ view }: { view: PublicGameState }) {
   const need = view.seatsNeeded;
   return (
     <div className="tracks">
-      <Track icon="🐟" label="食料" value={view.food} need={need} cap={view.foodCap} flyKey="food" />
-      <Track icon="💧" label="水" value={view.water} need={need} cap={view.waterCap} flyKey="water" />
+      <Track icon="fish" label="食料" value={view.food} need={need} cap={view.foodCap} flyKey="food" />
+      <Track icon="water" label="水" value={view.water} need={need} cap={view.waterCap} flyKey="water" />
       <div className="track raft" data-fly="raft">
         <div className="track-head">
-          <span>🛶 船</span>
+          <span className="tk-label"><GameIcon name="ship" size={20} />船</span>
           <strong className={view.raftSeats >= need ? 'ok' : 'short'}>{view.raftSeats} / {need}</strong>
         </div>
         <div className="raft-bar" title={`木 ${view.raftProgress}/${RAFT_LOOP}`}>
@@ -214,7 +217,7 @@ function Track({ icon, label, value, need, cap, flyKey }: { icon: string; label:
   return (
     <div className="track" data-fly={flyKey}>
       <div className="track-head">
-        <span>{icon} {label}</span>
+        <span className="tk-label"><GameIcon name={icon} size={20} />{label}</span>
         <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}<small> / 必要{need}</small></strong>
       </div>
       <Pips value={value} need={need} short={short} />
@@ -275,7 +278,7 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
       </div>
       <div className="pcard-foot">
         <span className="stash">手札 {p.handCount}</span>
-        {p.permanents.length > 0 && <span className="perms">{p.permanents.map((k) => CARD_INFO[k as CardKind].icon).join('')}</span>}
+        {p.permanents.length > 0 && <span className="perms">{p.permanents.map((k) => <GameIcon key={k} name={k} size={16} fallback={CARD_INFO[k as CardKind].icon} />)}</span>}
         {view.phase === 'vote' && p.votesReceived ? <span className="votes">{p.votesReceived}票</span> : null}
       </div>
     </div>
@@ -312,11 +315,11 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
     <div className="panel yourturn">
       <h3>あなたの番です — 行動を選ぶ</h3>
       <div className="action-grid">
-        <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}>{ACTION_LABEL.fish}<span className="sub">袋から1玉・魚1〜3（不漁あり）</span></button>
-        <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}>{ACTION_LABEL.water}<span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
-        <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}>{ACTION_LABEL.search}<span className="sub">カードを1枚引く</span></button>
+        <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}><GameIcon name={ACTION_ICON.fish} size={32} /><span className="act-name">{ACTION_LABEL.fish}</span><span className="sub">袋から1玉・魚1〜3（不漁あり）</span></button>
+        <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}><GameIcon name={ACTION_ICON.water} size={32} /><span className="act-name">{ACTION_LABEL.water}</span><span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
+        <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}><GameIcon name={ACTION_ICON.search} size={32} /><span className="act-name">{ACTION_LABEL.search}</span><span className="sub">カードを1枚引く</span></button>
         <div className="btn action wood-action">
-          {ACTION_LABEL.wood}
+          <GameIcon name={ACTION_ICON.wood} size={32} /><span className="act-name">{ACTION_LABEL.wood}</span>
           <span className="sub">まず木1本（斧で2本）確定</span>
           <div className="wood-push">
             <label>さらに引く本数：{wood} 本（0〜5）<input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
@@ -389,7 +392,7 @@ function HandBar({ me, onSelect }: { me?: PublicPlayer; onSelect: (card: Card) =
           const info = CARD_INFO[c.kind];
           return (
             <button key={c.id} className={`card-chip cat-${info.cat}`} title={info.desc} onClick={() => { playSound('click'); onSelect(c); }}>
-              <span className="card-ic">{info.icon}</span>
+              <GameIcon className="card-ic" name={c.kind} size={30} fallback={info.icon} />
               <span className="card-nm">{info.name}</span>
             </button>
           );
@@ -450,7 +453,7 @@ function ItemModal({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal item-modal" onClick={(e) => e.stopPropagation()}>
-        <div className={`item-ic cat-${info.cat}`}>{info.icon}</div>
+        <div className={`item-ic cat-${info.cat}`}><GameIcon name={card.kind} size={56} fallback={info.icon} /></div>
         <h3>{info.name}</h3>
         <p className="item-desc">{info.desc}</p>
         <p className="hint">カードを使っても、このターンの行動（釣り・水汲み・木集め・探索）は別に行えます。</p>

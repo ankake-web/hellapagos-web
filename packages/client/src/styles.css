@@ -594,6 +594,18 @@ html.fx-shake .board { animation: shake 0.46s ease-in-out; }
   .board .header { padding-left: 46px; padding-right: 46px; }
 }
 
+/* ===== SVGアイコン統合 ===== */
+.track-head { align-items: center; }
+.tk-label { display: inline-flex; align-items: center; gap: 0.34rem; }
+.tk-label svg { flex-shrink: 0; }
+.btn.action { gap: 0.18rem; }
+.btn.action .act-name { font-weight: 800; font-size: 1.02rem; }
+.btn.action svg { margin-bottom: 0.05rem; }
+.perms { display: inline-flex; align-items: center; gap: 3px; letter-spacing: 0; }
+.card-chip .card-ic { display: block; }
+.banner.target svg { flex-shrink: 0; vertical-align: middle; }
+.item-modal .item-ic svg { display: block; }
+
 /* ===== 資源・カード獲得：飛んでいくトークン ===== */
 .fly-layer { position: fixed; inset: 0; z-index: 17; pointer-events: none; }
 .fly-token {
