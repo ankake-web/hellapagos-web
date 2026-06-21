@@ -73,6 +73,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
       <WeatherFX view={view} />
       <RoundSplash view={view} />
       <DrawCenter view={view} draw={freshDraw} />
+      <WoodSplash view={view} draw={freshDraw} />
       <EventFX view={view} />
       <FlyLayer view={view} />
       {targeting && (
@@ -155,6 +156,8 @@ function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameSta
   const isMine = draw.playerId === view.youId;
   const snake = draw.balls.some((b) => 'snake' in b) && draw.action === 'wood';
   if (!isMine && !snake) return null;
+  // 自分の木集めは WoodSplash（一枚絵）が担当する画像があるならそちらに任せる
+  if (draw.action === 'wood' && isMine && (ART['wood-bite'] || ART['wood-ok'])) return null;
   const who = view.players.find((p) => p.id === draw.playerId)?.name ?? '';
   const fishTotal = draw.balls.reduce((n, b) => n + ('fish' in b ? b.fish : 0), 0);
   return (
@@ -163,11 +166,28 @@ function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameSta
       <Balls balls={draw.balls} action={draw.action} />
       <span className="draw-sum">
         {snake
-          ? '🐍 噛まれた！追加分は失う（確定分の木は確保）'
+          ? '噛まれた！追加分は失う（確定分の木は確保）'
           : draw.action === 'fish'
-            ? (fishTotal > 0 ? `🐟 食料 +${fishTotal}` : '不漁…')
-            : `🪵 木 +${draw.balls.length}`}
+            ? (fishTotal > 0 ? `食料 +${fishTotal}` : '不漁…')
+            : `木 +${draw.balls.length}`}
       </span>
+    </div>
+  );
+}
+
+/** 木集めの「成功（木材ゲット）／失敗（ヘビに噛まれる）」を一枚絵で大きく見せる演出。
+ *  art/wood-ok.* と art/wood-bite.* を置くと有効化。無ければ DrawCenter の通常表示にフォールバック。 */
+function WoodSplash({ view, draw }: { view: PublicGameState; draw: PublicGameState['lastDraw'] | null }) {
+  if (!draw || draw.action !== 'wood' || draw.playerId !== view.youId || !draw.balls.length) return null;
+  const bit = draw.balls.some((b) => 'snake' in b);
+  const art = bit ? ART['wood-bite'] : ART['wood-ok'];
+  if (!art) return null;
+  return (
+    <div className="wood-splash" aria-hidden>
+      <div className={`ws-card ${bit ? 'bite' : 'ok'}`}>
+        <img className="ws-art" src={art} alt="" />
+        <span className="ws-text">{bit ? 'ヘビに噛まれた！毒で次ラウンド休み・追加分は失う' : `木材 +${draw.balls.length} を確保！`}</span>
+      </div>
     </div>
   );
 }
@@ -192,25 +212,57 @@ function Header({ view }: { view: PublicGameState }) {
   );
 }
 
-/** 食料・水・船を1行のコンパクトな資源バーにまとめる（大きめのアイコン＋数値／必要数）。 */
+/** 食料・水を上段に2分割、船を下段に大きく表示する。 */
 function Tracks({ view }: { view: PublicGameState }) {
   const need = view.seatsNeeded;
   return (
     <div className="tracks">
-      <ResCell icon="fish" value={view.food} need={need} flyKey="food" title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`} />
-      <ResCell icon="water" value={view.water} need={need} flyKey="water" title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`} />
-      <ResCell icon="ship" value={view.raftSeats} need={need} flyKey="raft" raft title={`船 ${view.raftSeats} / ${need}（木${RAFT_LOOP}で+1・進捗${view.raftProgress}/${RAFT_LOOP}）`} />
+      <div className="tracks-top">
+        <ResCell icon="fish" value={view.food} need={need} flyKey="food" title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`} />
+        <ResCell icon="water" value={view.water} need={need} flyKey="water" title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`} />
+      </div>
+      <ResCell
+        icon="ship"
+        value={view.raftSeats}
+        need={need}
+        flyKey="raft"
+        raft
+        big
+        sub={`木 ${view.raftProgress}/${RAFT_LOOP} で次の席`}
+        title={`船 ${view.raftSeats} / ${need}（木${RAFT_LOOP}で+1）`}
+      />
     </div>
   );
 }
-function ResCell({ icon, value, need, flyKey, raft, title }: { icon: string; value: number; need: number; flyKey: string; raft?: boolean; title?: string }) {
+function ResCell({
+  icon,
+  value,
+  need,
+  flyKey,
+  raft,
+  big,
+  sub,
+  title,
+}: {
+  icon: string;
+  value: number;
+  need: number;
+  flyKey: string;
+  raft?: boolean;
+  big?: boolean;
+  sub?: string;
+  title?: string;
+}) {
   const short = value < need;
   return (
-    <div className={`rcell ${raft ? 'raft' : ''} ${short ? 'short' : 'ok'}`} data-fly={flyKey} title={title}>
-      <GameIcon name={icon} size={46} className="rcell-ic" />
-      <div className="rcell-num">
-        <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}</strong>
-        <small>/{need}</small>
+    <div className={`rcell ${raft ? 'raft' : ''} ${big ? 'big' : ''} ${short ? 'short' : 'ok'}`} data-fly={flyKey} title={title}>
+      <GameIcon name={icon} size={big ? 64 : 44} className="rcell-ic" />
+      <div className="rcell-body">
+        <div className="rcell-num">
+          <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}</strong>
+          <small>/{need}</small>
+        </div>
+        {sub && <span className="rcell-sub">{sub}</span>}
       </div>
     </div>
   );
@@ -636,13 +688,21 @@ function EventFX({ view }: { view: PublicGameState }) {
   }, [e?.id]);
   if (!cur) return null;
   const meta = EV_META[cur.kind] ?? { ic: '❗', cls: 'info' };
+  // 自分の木集めのヘビは WoodSplash（一枚絵）が担当するので、カードは重ねずフラッシュのみにする。
+  const woodSplashHandles =
+    cur.kind === 'snake' &&
+    view.lastDraw?.action === 'wood' &&
+    view.lastDraw?.playerId === view.youId &&
+    (!!ART['wood-bite'] || !!ART['wood-ok']);
   return (
     <>
       {cur.kind !== 'seat' && <div className={`fx-flash ${meta.cls}`} key={cur.id} />}
-      <div className={`event-card ${meta.cls}`} key={`c${cur.id}`}>
-        <span className="ev-ic">{meta.ic}</span>
-        <span className="ev-text">{shipText(cur.text)}</span>
-      </div>
+      {!woodSplashHandles && (
+        <div className={`event-card ${meta.cls}`} key={`c${cur.id}`}>
+          <span className="ev-ic">{meta.ic}</span>
+          <span className="ev-text">{shipText(cur.text)}</span>
+        </div>
+      )}
     </>
   );
 }
@@ -653,11 +713,11 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
   const sole = view.config.soleSurvivor;
   const youWon = sole ? !!me?.escaped && escaped.length === 1 : !!me?.escaped;
   const headline = sole
-    ? escaped.length === 1 ? `🏝️ 単独生存：${escaped[0].name}` : escaped.length > 0 ? '⚓ 脱出者あり（単独生存なし）' : '💀 全滅'
-    : escaped.length > 0 ? '🛶 脱出成功' : '💀 全滅';
+    ? escaped.length === 1 ? `単独生存：${escaped[0].name}` : escaped.length > 0 ? '脱出者あり（単独生存なし）' : '全滅'
+    : escaped.length > 0 ? '脱出成功' : '全滅';
   const verdict = !me ? null : youWon ? (sole ? '単独生存、あなたの勝利！' : 'あなたは生き延びた！') : me.escaped ? '脱出したが独り占めできず…' : 'あなたは島に消えた…';
-  const line = (p: PublicPlayer, icon: string) => (
-    <li key={p.id}>{icon} {p.name}{p.persona && <span className="reveal">（{PERSONA_INFO[p.persona].label}）</span>}</li>
+  const line = (p: PublicPlayer) => (
+    <li key={p.id}>{p.name}{p.persona && <span className="reveal">（{PERSONA_INFO[p.persona].label}）</span>}</li>
   );
   // 結末の大きな挿絵（全員脱出/全滅、または自分の生死）。未提供のキーは近い絵にフォールバック。
   const allEscaped = escaped.length > 0 && dead.length === 0;
@@ -678,8 +738,8 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
         {!view.isSpectator && verdict && <p className={`verdict ${youWon ? 'win' : 'lose'}`}>{verdict}</p>}
         {view.isSpectator && <p className="verdict">観戦お疲れさまでした。</p>}
         <div className="result-cols">
-          <div><h4>脱出（{escaped.length}）</h4><ul>{escaped.map((p) => line(p, '🛶'))}{escaped.length === 0 && <li className="hint">なし</li>}</ul></div>
-          <div><h4>島に消えた（{dead.length}）</h4><ul>{dead.map((p) => line(p, '💀'))}{dead.length === 0 && <li className="hint">なし</li>}</ul></div>
+          <div><h4>脱出（{escaped.length}）</h4><ul>{escaped.map((p) => line(p))}{escaped.length === 0 && <li className="hint">なし</li>}</ul></div>
+          <div><h4>島に消えた（{dead.length}）</h4><ul>{dead.map((p) => line(p))}{dead.length === 0 && <li className="hint">なし</li>}</ul></div>
         </div>
         <p className="hint">（カッコ内はAIの正体＝性格）</p>
         <button className="btn primary" onClick={onLeave}>新しいゲームへ</button>

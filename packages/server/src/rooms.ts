@@ -117,6 +117,12 @@ function normRoomId(roomId: string): string {
 function rngFor(s: GameState, salt: number): Rng {
   return new Rng(s.rngState + s.round * 131 + salt * 17 + 1);
 }
+/** 毎ゲーム異なる展開（デッキ・天候・袋引き）にするためのランダムシード。 */
+function randomSeed(): number {
+  const a = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(a);
+  return a[0] | 0;
+}
 
 export class RoomManager {
   private rooms = new Map<string, ServerRoom>();
@@ -131,7 +137,7 @@ export class RoomManager {
     const room: ServerRoom = {
       id: roomId,
       hostId: playerId,
-      state: createGame([{ id: playerId, name: clean(name), isBot: false }]),
+      state: createGame([{ id: playerId, name: clean(name), isBot: false }], { seed: randomSeed() }),
       sockets: new Map([[playerId, socketId]]),
       spectators: new Map(),
       chat: [],

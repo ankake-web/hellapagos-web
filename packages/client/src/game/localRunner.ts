@@ -55,6 +55,12 @@ function genId(len: number): string {
   for (let i = 0; i < len; i++) o += a[b[i] % a.length];
   return o;
 }
+/** 毎ゲーム異なる展開（デッキ・天候・袋引き）にするためのランダムシード。 */
+function randomSeed(): number {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0] | 0;
+}
 function rngFor(s: GameState, salt: number): Rng {
   return new Rng(s.rngState + s.round * 131 + salt * 17 + 1);
 }
@@ -109,7 +115,7 @@ export class LocalRunner {
   createRoom(name: string): { ok: true; roomId: string; playerId: string } {
     this.myId = genId(8);
     this.hostId = this.myId;
-    this.state = createGame([{ id: this.myId, name: clean(name), isBot: false }]);
+    this.state = createGame([{ id: this.myId, name: clean(name), isBot: false }], { seed: randomSeed() });
     this.emit();
     return { ok: true, roomId: 'OFFLINE', playerId: this.myId };
   }
