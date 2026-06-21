@@ -153,6 +153,10 @@ h1, h2, h3, h4 { margin: 0; }
 .subtitle { color: var(--muted); margin: 0.3rem 0 0.8rem; line-height: 1.6; font-size: 0.92rem; }
 .home-links { display: flex; gap: 0.6rem; margin: 0.2rem 0 1rem; }
 .home-links .btn { flex: 1; }
+/* オンライン/オフラインの切替タブ */
+.mode-tabs { display: flex; gap: 0.3rem; margin: 0.2rem 0 0.7rem; background: rgba(0, 0, 0, 0.24); border: 1px solid var(--line); border-radius: 12px; padding: 0.25rem; }
+.mode-tab { flex: 1; padding: 0.5rem 0.4rem; border: none; border-radius: 9px; background: transparent; color: var(--muted); font-family: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.mode-tab.active { background: linear-gradient(180deg, var(--sun), var(--sun-2)); color: #4a2c08; box-shadow: var(--shadow-sm); }
 .field { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.8rem 0; font-size: 0.82rem; color: var(--muted); }
 .field input, .chat-input input, .config-row select {
   padding: 0.66rem 0.85rem; border-radius: 12px; border: 1px solid var(--line-strong);

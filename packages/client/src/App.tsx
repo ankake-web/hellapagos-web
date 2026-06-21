@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage, PublicGameState } from '@hellapagos/shared';
-import { api, clearSession, loadSession, saveSession, type Session } from './api.js';
-import { socket } from './socket.js';
+import { api, clearSession, loadSession, saveSession, setLocalRunner, type Session } from './api.js';
+import { socket, connectSocket } from './socket.js';
+import { LocalRunner } from './game/localRunner.js';
 import { isMuted, playSound, toggleMute, startBgm, stopBgm, setBgmMood } from './sound.js';
 import { loadStats, recordResult, type Stats } from './stats.js';
 import { Backdrop } from './components/Backdrop.js';
@@ -22,6 +23,7 @@ export function App() {
   const [showConnBanner, setShowConnBanner] = useState(false);
   const sfx = useRef({ logId: -1, phase: '', weather: '', gameoverDone: false });
   const chatLen = useRef(0);
+  const localRef = useRef<LocalRunner | null>(null);
 
   // socket イベント購読 & 自動復帰
   useEffect(() => {
@@ -45,8 +47,12 @@ export function App() {
     setConnected(socket.connected);
 
     const saved = loadSession();
-    if (saved) {
+    if (saved && saved.offline) {
+      // オフライン対戦はブラウザ内のみ。リロードでは復帰できないので破棄して新規へ。
+      clearSession();
+    } else if (saved) {
       setSession(saved);
+      connectSocket();
       const doRejoin = () =>
         api.rejoin(saved.roomId, saved.playerId).then((res) => {
           if (!res.ok) {
@@ -122,15 +128,16 @@ export function App() {
     setBgmMood(view?.hurricaneRevealed ? 'tense' : 'calm');
   }, [view?.hurricaneRevealed]);
 
-  // 接続バナーは「一定時間つながらなかった場合だけ」表示（初回ロードの一瞬の点滅を防ぐ）
+  // 接続バナーは「オンラインのセッション中に一定時間つながらなかった場合だけ」表示。
+  // ホーム画面やオフライン対戦中は出さない。
   useEffect(() => {
-    if (connected) {
+    if (connected || !session || session.offline) {
       setShowConnBanner(false);
       return;
     }
     const id = window.setTimeout(() => setShowConnBanner(true), 800);
     return () => window.clearTimeout(id);
-  }, [connected]);
+  }, [connected, session]);
 
   // ゲーム終了時に通算戦績を記録（1ルームにつき1回・観戦者は除外）
   useEffect(() => {
@@ -146,7 +153,27 @@ export function App() {
     setRecordedRoom(session.roomId);
   }, [view, session, recordedRoom]);
 
-  const handleCreate = async (name: string) => {
+  const handleCreate = async (name: string, offline: boolean) => {
+    setChat([]);
+    sfx.current = { logId: -1, phase: '', weather: '', gameoverDone: false };
+    if (offline) {
+      // サーバを介さずブラウザ内で進行するローカル・ランナーを使う。
+      const runner = new LocalRunner({
+        onState: (s) => setView(s),
+        onChat: (m) => setChat((prev) => [...prev, m].slice(-80)),
+      });
+      localRef.current = runner;
+      setLocalRunner(runner);
+      const res = runner.createRoom(name);
+      const s = { roomId: res.roomId, playerId: res.playerId, name, offline: true };
+      saveSession(s);
+      setSession(s);
+      setConnected(true);
+      return;
+    }
+    setLocalRunner(null);
+    localRef.current = null;
+    connectSocket();
     const res = await api.createRoom(name);
     if (res.ok) {
       const s = { roomId: res.roomId, playerId: res.playerId, name };
@@ -158,6 +185,9 @@ export function App() {
   };
 
   const handleJoin = async (roomId: string, name: string) => {
+    setLocalRunner(null);
+    localRef.current = null;
+    connectSocket();
     const res = await api.joinRoom(roomId, name);
     if (res.ok) {
       const s = { roomId: res.roomId, playerId: res.playerId, name };
@@ -169,7 +199,9 @@ export function App() {
   };
 
   const leave = () => {
-    api.leaveRoom();
+    api.leaveRoom(); // オフラインならローカル・ランナーを破棄、オンラインなら退出を送信
+    setLocalRunner(null);
+    localRef.current = null;
     clearSession();
     setSession(null);
     setView(null);
@@ -184,7 +216,7 @@ export function App() {
   if (!session || !view) {
     screen = <Home onCreate={handleCreate} onJoin={handleJoin} stats={stats} />;
   } else if (view.phase === 'lobby') {
-    screen = <Lobby view={view} onLeave={leave} />;
+    screen = <Lobby view={view} onLeave={leave} offline={!!session?.offline} />;
   } else {
     screen = <Board view={view} chat={chat} onSay={api.say} onLeave={leave} />;
   }

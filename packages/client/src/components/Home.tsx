@@ -9,7 +9,7 @@ function suggestName(): string {
 }
 
 interface Props {
-  onCreate: (name: string) => void;
+  onCreate: (name: string, offline: boolean) => void;
   onJoin: (roomId: string, name: string) => void;
   stats: Stats;
 }
@@ -20,6 +20,8 @@ export function Home({ onCreate, onJoin, stats }: Props) {
   const [roomId, setRoomId] = useState(urlRoom.replace(/\D/g, '').slice(0, 4));
   const [showRules, setShowRules] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
+  // URLにルームIDが付いている＝招待リンク経由なので最初からオンライン。既定はオンライン。
+  const [offline, setOffline] = useState(false);
   const trimmed = name.trim();
   const room = roomId.replace(/\D/g, '');
 
@@ -53,37 +55,48 @@ export function Home({ onCreate, onJoin, stats }: Props) {
           </div>
         </label>
 
-        <button className="btn primary" disabled={!trimmed} onClick={() => onCreate(trimmed)}>
-          ルームを作る
+        <div className="mode-tabs" role="tablist">
+          <button type="button" role="tab" className={`mode-tab ${!offline ? 'active' : ''}`} onClick={() => setOffline(false)}>
+            オンライン対戦
+          </button>
+          <button type="button" role="tab" className={`mode-tab ${offline ? 'active' : ''}`} onClick={() => setOffline(true)}>
+            オフライン（CPU）
+          </button>
+        </div>
+
+        <button className="btn primary" disabled={!trimmed} onClick={() => onCreate(trimmed, offline)}>
+          {offline ? 'ひとりで始める' : 'ルームを作る'}
         </button>
 
-        <div className="divider">または</div>
+        {!offline && (
+          <>
+            <div className="divider">または</div>
 
-        <label className="field">
-          <span>ルームID</span>
-          <input
-            value={roomId}
-            maxLength={4}
-            placeholder="1234"
-            className="roomid-input"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            inputMode="numeric"
-            pattern="[0-9]*"
-            onChange={(e) => setRoomId(e.target.value.replace(/\D/g, '').slice(0, 4))}
-          />
-        </label>
-        <button
-          className="btn"
-          disabled={!trimmed || room.length < 4}
-          onClick={() => onJoin(room, trimmed)}
-        >
-          ルームに参加
-        </button>
+            <label className="field">
+              <span>ルームID</span>
+              <input
+                value={roomId}
+                maxLength={4}
+                placeholder="1234"
+                className="roomid-input"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                onChange={(e) => setRoomId(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              />
+            </label>
+            <button className="btn" disabled={!trimmed || room.length < 4} onClick={() => onJoin(room, trimmed)}>
+              ルームに参加
+            </button>
+          </>
+        )}
 
         <p className="hint">
-          ※ 1人でもAIボットを追加してすぐ遊べます。友達と遊ぶときはルームIDかURLを共有しましょう。
+          {offline
+            ? 'サーバ不要・待ち時間なし。CPUとこの端末だけで対戦します（戦績は記録されます）。'
+            : '友達と遊ぶときはルームIDかURLを共有。1人でもAIボットを追加してすぐ遊べます。'}
         </p>
 
         {stats.games > 0 && (

@@ -6,9 +6,10 @@ import { api } from '../api.js';
 interface Props {
   view: PublicGameState;
   onLeave: () => void;
+  offline?: boolean;
 }
 
-export function Lobby({ view, onLeave }: Props) {
+export function Lobby({ view, onLeave, offline }: Props) {
   const isHost = view.youId === view.hostId;
   const [copied, setCopied] = useState(false);
   const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCodeOf(view)}`;
@@ -33,18 +34,22 @@ export function Lobby({ view, onLeave }: Props) {
           </button>
         </div>
 
-        <div className="room-code">
-          ルームID: <strong>{roomCodeOf(view)}</strong>
-          <button className="btn ghost small" onClick={copy}>
-            {copied ? 'コピーしました' : '招待URLをコピー'}
-          </button>
-        </div>
+        {offline ? (
+          <div className="room-code">オフライン対戦（CPU・この端末だけ）</div>
+        ) : (
+          <div className="room-code">
+            ルームID: <strong>{roomCodeOf(view)}</strong>
+            <button className="btn ghost small" onClick={copy}>
+              {copied ? 'コピーしました' : '招待URLをコピー'}
+            </button>
+          </div>
+        )}
 
         <ul className="player-list">
           {view.players.map((p) => (
             <li key={p.id}>
               <span>
-                {p.isBot ? '🤖' : '🧍'} {p.name}
+                {p.isBot && <span className="pc-face bot">CPU</span>} {p.name}
                 {p.id === view.hostId && <span className="tag host">ホスト</span>}
                 {p.id === view.youId && <span className="tag you">あなた</span>}
               </span>

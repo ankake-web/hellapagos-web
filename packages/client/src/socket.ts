@@ -7,6 +7,13 @@ export const SERVER_URL =
   import.meta.env.VITE_SERVER_URL ??
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8787');
 
+// 自動接続しない：オフライン対戦ではサーバへ一切繋がない（無料プランのスリープを起こさない）。
+// オンライン対戦を選んだ時だけ connectSocket() で接続する。
 export const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(SERVER_URL, {
-  autoConnect: true,
+  autoConnect: false,
 });
+
+/** オンライン対戦に入るときに呼ぶ（多重呼び出しは無害）。 */
+export function connectSocket(): void {
+  if (!socket.connected) socket.connect();
+}
