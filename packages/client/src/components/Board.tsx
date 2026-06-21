@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPlayer } from '@hellapagos/shared';
-import { CARD_INFO, MAX_SEATS, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
+import { CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
 import { playSound } from '../sound.js';
 
@@ -27,6 +27,11 @@ const KIND_CLASS: Record<string, string> = {
   draw: 'info',
   info: 'info',
 };
+
+/** 表示用に「座席」を「船」へ言い換える（サーバ未再デプロイでも名称統一を保つ）。 */
+function shipText(s: string): string {
+  return s.replace(/座席/g, '船');
+}
 
 function weatherLabel(v: PublicGameState): string {
   if (v.hurricaneRevealed) return '🌀 ハリケーン';
@@ -60,6 +65,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
   return (
     <div className={`board ${weatherClass}`}>
       <Header view={view} />
+      <HandBar me={me} onSelect={setSelectedCard} />
       <WeatherFX view={view} />
       <RoundSplash view={view} />
       <DrawCenter view={view} draw={freshDraw} />
@@ -76,7 +82,6 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           <Tracks view={view} />
           <PlayerGrid view={view} draw={freshDraw} targetable={targetable} onPick={pickTarget} />
           <PhasePanel view={view} me={me} />
-          {me && me.alive && !me.escaped && <Hand view={view} me={me} onSelect={setSelectedCard} />}
         </div>
         <div className={`board-right tab-${tab}`}>
           <div className="right-tabs">
@@ -191,7 +196,7 @@ function Tracks({ view }: { view: PublicGameState }) {
       <Track icon="💧" label="水" value={view.water} need={need} cap={view.waterCap} flyKey="water" />
       <div className="track raft" data-fly="raft">
         <div className="track-head">
-          <span>🛶 座席</span>
+          <span>🛶 船</span>
           <strong className={view.raftSeats >= need ? 'ok' : 'short'}>{view.raftSeats} / {need}</strong>
         </div>
         <div className="raft-bar" title={`木 ${view.raftProgress}/${RAFT_LOOP}`}>
@@ -199,24 +204,42 @@ function Tracks({ view }: { view: PublicGameState }) {
             <span key={i} className={`plank ${i < view.raftProgress ? 'on' : ''}`} />
           ))}
         </div>
-        <div className="hint-sm">木{RAFT_LOOP}で座席+1（最大{MAX_SEATS}）</div>
+        <div className="hint-sm">木{RAFT_LOOP}で+1</div>
       </div>
     </div>
   );
 }
 function Track({ icon, label, value, need, cap, flyKey }: { icon: string; label: string; value: number; need: number; cap: number; flyKey?: string }) {
   const short = value < need;
-  const pct = Math.max(0, Math.min(100, (value / Math.max(need, 1)) * 100));
   return (
     <div className="track" data-fly={flyKey}>
       <div className="track-head">
         <span>{icon} {label}</span>
         <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}<small> / 必要{need}</small></strong>
       </div>
-      <div className="gauge" title={`${value} / 必要${need}（上限${cap}）`}>
-        <div className={`gauge-fill ${short ? 'short' : 'ok'}`} style={{ width: `${pct}%` }} />
-      </div>
+      <Pips value={value} need={need} short={short} />
       <div className="hint-sm">{short ? `あと${need - value}不足` : '充足'}・上限{cap}</div>
+    </div>
+  );
+}
+
+/** 量を「丸の数」で表す。満たしている分は色付き、必要数までの不足分は空の丸。多すぎる分は +N に畳む。 */
+function Pips({ value, need, short }: { value: number; need: number; short: boolean }) {
+  const MAX = 12;
+  const filled = Math.min(value, MAX);
+  // 必要数までは枠（空き）を見せて「あといくつ」を直感的に。必要数を超える余剰は出さない。
+  const empties = Math.max(0, Math.min(need, MAX) - filled);
+  const overflow = value - filled;
+  return (
+    <div className="pips" title={`${value} / 必要${need}`}>
+      {Array.from({ length: filled }).map((_, i) => (
+        <span key={`f${i}`} className={`pip ${short ? 'short' : 'ok'}`} />
+      ))}
+      {Array.from({ length: empties }).map((_, i) => (
+        <span key={`e${i}`} className="pip empty" />
+      ))}
+      {overflow > 0 && <span className="pip-more">+{overflow}</span>}
+      {value === 0 && empties === 0 && <span className="pip-more">0</span>}
     </div>
   );
 }
@@ -345,7 +368,7 @@ function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
   return (
     <div className="panel escape">
       <h3>脱出のチャンス！</h3>
-      <p>座席{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
+      <p>船{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
       <div className="panel-actions">
         <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>まだ残る</button>
         <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>🛶 出航する！</button>
@@ -354,13 +377,14 @@ function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
   );
 }
 
-function Hand({ view, me, onSelect }: { view: PublicGameState; me: PublicPlayer; onSelect: (card: Card) => void }) {
-  const hand = me.hand ?? [];
-  if (hand.length === 0) return null;
+/** 自分の手札を画面上部に常時表示する帯。スマホでは横スクロール＋スティッキーで常に確認できる。 */
+function HandBar({ me, onSelect }: { me?: PublicPlayer; onSelect: (card: Card) => void }) {
+  const hand = me?.hand ?? [];
+  if (!me || !me.alive || me.escaped || hand.length === 0) return null;
   return (
-    <div className="hand">
-      <span className="hand-label">手札（タップで効果と使い方）</span>
-      <div className="hand-cards">
+    <div className="hand-bar">
+      <span className="hand-bar-label">🎴 手札<small>{hand.length}</small></span>
+      <div className="hand-bar-cards">
         {hand.map((c) => {
           const info = CARD_INFO[c.kind];
           return (
@@ -449,7 +473,7 @@ function LogPanel({ view }: { view: PublicGameState }) {
       <h3>記録</h3>
       <ul>
         {entries.map((e) => (
-          <li key={e.id} className={KIND_CLASS[e.kind ?? 'info']}><span className="log-day">R{e.round}</span> {e.text}</li>
+          <li key={e.id} className={KIND_CLASS[e.kind ?? 'info']}><span className="log-day">R{e.round}</span> {shipText(e.text)}</li>
         ))}
       </ul>
     </div>
@@ -504,6 +528,7 @@ function Chat({ view, chat, onSay }: { view: PublicGameState; chat: ChatMessage[
   );
 }
 
+/** ラウンド開始時に「その日の天気」を画面いっぱいに大きく見せる演出（常時の雨ライン表示の代わり）。 */
 function RoundSplash({ view }: { view: PublicGameState }) {
   const [show, setShow] = useState(false);
   const ref = useRef(0);
@@ -512,39 +537,30 @@ function RoundSplash({ view }: { view: PublicGameState }) {
     if (view.round === ref.current) return;
     ref.current = view.round;
     setShow(true);
-    const id = window.setTimeout(() => setShow(false), 1100);
+    const id = window.setTimeout(() => setShow(false), 1900);
     return () => window.clearTimeout(id);
   }, [view.round, view.phase]);
   if (!show) return null;
+  const icon = view.hurricaneRevealed ? '🌀' : view.currentPrecip === 0 ? '☀️' : view.currentPrecip >= 3 ? '⛈️' : '🌧️';
+  const wClass = view.hurricaneRevealed ? 'storm' : view.currentPrecip === 0 ? 'sun' : 'rain';
   return (
-    <div className="day-splash">
-      <div className="day-splash-inner">
-        <span className="ds-day">{view.round}ラウンド</span>
-        <span className="ds-weather">{weatherLabel(view)}</span>
-        {view.hurricaneRevealed && <span className="ds-storm">ハリケーン！</span>}
+    <div className="weather-reveal" aria-hidden>
+      <div className={`wr-card ${wClass}`}>
+        <span className="wr-round">{view.round}ラウンド目</span>
+        <span className="wr-icon">{icon}</span>
+        <span className="wr-weather">{weatherLabel(view)}</span>
+        {view.hurricaneRevealed && <span className="wr-storm">本ラウンドで強制脱出！</span>}
       </div>
     </div>
   );
 }
 
-/** 天候の常時エフェクト：雨が降る／晴れの陽射し／嵐の稲妻＋豪雨。 */
+/** 天候の常時エフェクト。雨のライン表示は画面が見づらいので廃止し、天気はラウンド開始の大きな演出で示す。
+ *  ここでは盤面を覆わない控えめな色味だけ（晴れの陽射し／嵐のうっすらした暗がり）にとどめる。 */
 function WeatherFX({ view }: { view: PublicGameState }) {
   if (view.phase === 'lobby' || view.phase === 'gameover') return null;
-  if (view.hurricaneRevealed) {
-    return (
-      <div className="wfx wfx-storm" aria-hidden>
-        <div className="wfx-rain heavy" />
-        <div className="wfx-light" />
-      </div>
-    );
-  }
-  if (view.currentPrecip > 0) {
-    return (
-      <div className="wfx" aria-hidden>
-        <div className={`wfx-rain p${Math.min(3, view.currentPrecip)}`} />
-      </div>
-    );
-  }
+  if (view.hurricaneRevealed) return <div className="wfx wfx-storm" aria-hidden />;
+  if (view.currentPrecip > 0) return null; // 雨ラインは出さない（RoundSplash の演出で代替）
   return <div className="wfx wfx-sun" aria-hidden />;
 }
 
@@ -627,13 +643,13 @@ const EV_META: Record<string, { ic: string; cls: string }> = {
 function EventFX({ view }: { view: PublicGameState }) {
   const e = [...view.log]
     .reverse()
-    .find((x) => x.kind === 'death' || x.kind === 'escape' || x.kind === 'snake' || x.text.includes('ハリケーン') || x.text.includes('座席が'));
+    .find((x) => x.kind === 'death' || x.kind === 'escape' || x.kind === 'snake' || x.text.includes('ハリケーン') || x.text.includes('船に乗れる') || x.text.includes('座席が'));
   const [cur, setCur] = useState<{ id: number; kind: string; text: string } | null>(null);
   const seen = useRef(-1);
   useEffect(() => {
     if (!e || e.id === seen.current) return;
     seen.current = e.id;
-    const kind = e.text.includes('ハリケーン') ? 'hurricane' : e.text.includes('座席が') ? 'seat' : (e.kind ?? 'info');
+    const kind = e.text.includes('ハリケーン') ? 'hurricane' : e.text.includes('船に乗れる') || e.text.includes('座席が') ? 'seat' : (e.kind ?? 'info');
     setCur({ id: e.id, kind, text: e.text });
     if (kind === 'death' || kind === 'snake' || kind === 'hurricane') {
       document.documentElement.classList.add('fx-shake');
@@ -649,7 +665,7 @@ function EventFX({ view }: { view: PublicGameState }) {
       {cur.kind !== 'seat' && <div className={`fx-flash ${meta.cls}`} key={cur.id} />}
       <div className={`event-card ${meta.cls}`} key={`c${cur.id}`}>
         <span className="ev-ic">{meta.ic}</span>
-        <span className="ev-text">{cur.text}</span>
+        <span className="ev-text">{shipText(cur.text)}</span>
       </div>
     </>
   );

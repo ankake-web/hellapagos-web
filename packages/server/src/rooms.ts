@@ -580,7 +580,7 @@ export class RoomManager {
       personaDesc: info.desc,
       hand: handKinds.length ? handKinds.join('、') : 'なし',
       sick: me.sick,
-      tracks: `食料${s.food}/水${s.water}/座席${s.raftSeats}（生存${alivePlayers(s).length}人）`,
+      tracks: `食料${s.food}/水${s.water}/船${s.raftSeats}（生存${alivePlayers(s).length}人）`,
       players,
       candidates,
       recentChat: recent || '（まだ無し）',

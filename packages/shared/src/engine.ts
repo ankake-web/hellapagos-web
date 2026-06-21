@@ -86,7 +86,7 @@ function addWood(s: GameState, n: number): void {
   while (prog >= RAFT_LOOP && s.raftSeats < MAX_SEATS) {
     prog -= RAFT_LOOP;
     s.raftSeats += 1;
-    pushLog(s, `筏の座席が1つ完成！（座席 ${s.raftSeats}）`, 'good');
+    pushLog(s, `🛶 船に乗れる人数が1人ぶん増えた！（${s.raftSeats}人）`, 'good');
   }
   s.raftProgress = s.raftSeats >= MAX_SEATS ? 0 : prog;
 }
@@ -741,7 +741,7 @@ function endRoundCheck(d: GameState): GameState {
   if (canEscapeAll(d)) {
     for (const p of d.players) p.escapeChoice = undefined;
     d.phase = 'escape';
-    pushLog(d, `脱出の条件を満たした（座席${d.raftSeats}/必要${need}、補給も十分）。出航するか投票。`, 'good');
+    pushLog(d, `脱出の条件を満たした（船${d.raftSeats}/必要${need}、補給も十分）。出航するか投票。`, 'good');
     return d;
   }
   return beginRound(d);

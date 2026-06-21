@@ -209,6 +209,22 @@ h1, h2, h3, h4 { margin: 0; }
 
 .board-main { display: grid; grid-template-columns: 1fr 310px; gap: 0.9rem; margin-top: 0.9rem; }
 @media (max-width: 860px) { .board-main { grid-template-columns: 1fr; } }
+/* board-left を flex 化して、スマホで並び順を入れ替えられるようにする */
+.board-left { display: flex; flex-direction: column; min-width: 0; }
+
+/* ===== 手札バー（画面上部に常時表示） ===== */
+.hand-bar {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-top: 0.7rem; padding: 0.45rem 0.7rem;
+  background: var(--sheen), var(--glass-3); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+.hand-bar-label { flex-shrink: 0; font-size: 0.78rem; font-weight: 800; color: var(--sand); }
+.hand-bar-label small { font-size: 0.66rem; color: var(--ink); background: rgba(0,0,0,0.3); border-radius: 999px; padding: 0.05rem 0.4rem; margin-left: 0.3rem; }
+.hand-bar-cards { display: flex; gap: 0.4rem; overflow-x: auto; padding: 2px 0; scrollbar-width: thin; }
+.hand-bar .card-chip { min-width: 60px; padding: 0.4rem 0.5rem 0.36rem; }
+.hand-bar .card-chip .card-ic { font-size: 1.2rem; }
 
 .tracks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.7rem; }
 @media (max-width: 560px) { .tracks { grid-template-columns: 1fr; } }
@@ -224,6 +240,13 @@ h1, h2, h3, h4 { margin: 0; }
 .gauge-fill { height: 100%; border-radius: 999px; transition: width 0.55s var(--ease-out); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 .gauge-fill.ok { background: linear-gradient(90deg, var(--good-2), var(--good)); }
 .gauge-fill.short { background: linear-gradient(90deg, var(--sun-2), var(--danger)); }
+/* 食料・水は量を「丸の数」で表示（バーは使わない） */
+.pips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0.55rem 0 0.3rem; min-height: 14px; }
+.pip { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3); }
+.pip.ok { background: radial-gradient(circle at 34% 28%, #aef0cf, var(--good-2)); }
+.pip.short { background: radial-gradient(circle at 34% 28%, var(--sun), var(--sun-2)); }
+.pip.empty { background: rgba(0, 0, 0, 0.28); border: 1px solid var(--line); box-shadow: none; }
+.pip-more { font-size: 0.78rem; font-weight: 800; color: var(--muted); align-self: center; margin-left: 0.1rem; font-variant-numeric: tabular-nums; }
 .raft-bar { display: flex; gap: 4px; margin-top: 0.5rem; }
 .raft-bar .plank { flex: 1; height: 14px; border-radius: 3px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--line); position: relative; }
 .raft-bar .plank.on { background: linear-gradient(180deg, var(--sand) 0%, var(--wood) 130%); border-color: var(--sand-2); box-shadow: 0 0 8px rgba(233, 216, 166, 0.4); }
@@ -258,8 +281,13 @@ h1, h2, h3, h4 { margin: 0; }
 .panel.spectate { color: var(--muted); text-align: center; }
 @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-.action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.7rem; }
-@media (max-width: 520px) { .action-grid { grid-template-columns: 1fr; } }
+.action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.7rem; align-items: start; }
+/* スマホでも4つの行動を 2×2 の「4分割」で表示（1列に潰さない） */
+@media (max-width: 520px) {
+  .action-grid { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .btn.action { min-height: 60px; padding: 0.7rem 0.5rem; font-size: 0.92rem; }
+  .btn.action .sub { font-size: 0.6rem; }
+}
 .btn.action {
   display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 1rem 0.8rem; font-size: 1.05rem; min-height: 78px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.02));
@@ -327,6 +355,29 @@ h1, h2, h3, h4 { margin: 0; }
 @keyframes dayin { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
 .num-pop { display: inline-block; animation: numpop 0.3s ease-out; }
 @keyframes numpop { 0% { transform: scale(1.5); filter: brightness(1.7); } 100% { transform: scale(1); } }
+
+/* ===== ラウンド開始の大きな天気演出（常時の雨ライン表示の代替） ===== */
+.weather-reveal { position: fixed; inset: 0; z-index: 24; display: flex; align-items: center; justify-content: center; pointer-events: none; padding: 1rem; }
+.wr-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+  padding: 1.6rem 2.6rem; border-radius: 24px; text-align: center;
+  background: rgba(8, 20, 26, 0.82); border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  animation: wrpop 0.45s var(--ease-out) both, wrfade 0.4s ease-in 1.45s both;
+}
+.wr-card.sun { box-shadow: var(--shadow-lg), 0 0 60px rgba(255, 190, 90, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+.wr-card.rain { box-shadow: var(--shadow-lg), 0 0 60px rgba(95, 200, 245, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+.wr-card.storm { border-color: var(--danger); box-shadow: var(--shadow-lg), 0 0 70px rgba(255, 111, 111, 0.3); }
+.wr-round { font-size: 1.05rem; font-weight: 800; color: var(--sand); letter-spacing: 0.05em; }
+.wr-icon { font-size: 5rem; line-height: 1; animation: wricon 1.2s ease-in-out; filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.45)); }
+.wr-weather { font-size: 1.6rem; font-weight: 800; }
+.wr-storm { color: var(--danger); font-weight: 800; font-size: 1.05rem; }
+@keyframes wrpop { from { opacity: 0; transform: scale(0.82) translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes wrfade { to { opacity: 0; transform: scale(1.04); } }
+@keyframes wricon { 0% { transform: scale(0.4) rotate(-14deg); } 50% { transform: scale(1.22) rotate(9deg); } 100% { transform: scale(1) rotate(0); } }
+@media (max-width: 560px) { .wr-card { padding: 1.3rem 1.8rem; } .wr-icon { font-size: 4rem; } .wr-weather { font-size: 1.35rem; } }
+@media (prefers-reduced-motion: reduce) { .wr-icon { animation: none; } }
 .event-banner {
   position: fixed; top: 18%; left: 50%; transform: translateX(-50%); z-index: 20;
   padding: 0.9rem 1.7rem; border-radius: 14px; font-size: 1.15rem; font-weight: 800;
@@ -451,6 +502,19 @@ html.fx-shake .board { animation: shake 0.46s ease-in-out; }
   .board-right.tab-chat .log { display: none; }
   .log { max-height: 52vh; }
   .chat-list { max-height: 48vh; }
+
+  /* スマホでは「資源トラック → 行動パネル → プレイヤー一覧」の順に並べ替える
+     （行動の選択を最優先で上に、プレイヤーパネルはその下に）。 */
+  .board-left > .tracks { order: 1; }
+  .board-left > .panel { order: 2; }
+  .board-left > .players { order: 3; margin-top: 0.6rem; }
+
+  /* 手札バーは画面上部に貼り付けて常に確認できるようにする。
+     左右上隅のメニュー/ミュートボタン(42px)に被らないよう内側に余白。 */
+  .hand-bar {
+    position: sticky; top: 0.45rem; z-index: 25;
+    padding-left: 50px; padding-right: 50px;
+  }
 }
 @media (max-width: 560px) {
   .board { padding: 0.6rem; }
