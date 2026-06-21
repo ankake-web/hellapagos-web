@@ -87,6 +87,8 @@ h1, h2, h3, h4 { margin: 0; }
   background: radial-gradient(60% 100% at 72% 0%, rgba(255, 180, 90, 0.18), transparent 60%);
 }
 @keyframes sunpulse { 0%, 100% { opacity: 0.85; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
+/* 実画像の背景（bg/scene.* がある時）。粒状感(::after)と周辺減光(::before)はそのまま上に乗る。 */
+.bd-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .bd-waves { position: absolute; left: 0; bottom: 0; width: 100%; height: 38vh; min-height: 220px; }
 .wv { transform-box: view-box; }
 .wv1 { fill: rgba(34, 110, 124, 0.5); animation: drift 11s linear infinite; }

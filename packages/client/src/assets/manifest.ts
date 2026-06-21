@@ -12,3 +12,13 @@ for (const [path, url] of Object.entries(pngs)) {
   const key = path.split('/').pop()!.replace(/\.png$/, '');
   CARD_ART[key] = url;
 }
+
+// 背景・タイトル挿絵の差し替え用。./bg/scene.* と ./bg/hero.* を置くと
+// それぞれアプリ背景・ホームのヒーロー挿絵が実画像に切り替わる（無ければCSS/SVGのまま）。
+const bgs = import.meta.glob('./bg/*.{png,jpg,jpeg,webp}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+
+export const BG_ART: Record<string, string> = {};
+for (const [path, url] of Object.entries(bgs)) {
+  const key = path.split('/').pop()!.replace(/\.(png|jpe?g|webp)$/, '');
+  BG_ART[key] = url;
+}

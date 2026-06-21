@@ -1,7 +1,7 @@
 // ヘルパゴスのSVGアイコン集（外部画像なしで一貫した手描き風ベクター）。
 // 48×48 の viewBox に統一。色は航海日誌風の暖色パレット、暗いガラス面でも視認できる配色。
 // 実画像PNG（assets/cards/<key>.png）があれば manifest 経由でそちらを優先表示する。
-import { CARD_ART } from './manifest';
+import { BG_ART, CARD_ART } from './manifest';
 
 const ICON_SVG: Record<string, string> = {
   // ===== 盤面グリフ =====
@@ -75,8 +75,11 @@ export function hasIcon(name: string): boolean {
   return !!CARD_ART[name] || !!ICON_SVG[name];
 }
 
-/** ホーム画面のヒーロー挿絵（無人島の夕暮れ・半完成のいかだ・遠雷）。 */
+/** ホーム画面のヒーロー挿絵。bg/hero.* の実画像があればそれを、無ければSVGを描く。 */
 export function HeroArt({ className }: { className?: string }) {
+  if (BG_ART.hero) {
+    return <img className={className} src={BG_ART.hero} alt="無人島の夕暮れ" />;
+  }
   return (
     <svg viewBox="0 0 320 180" className={className} role="img" aria-label="無人島の夕暮れ" preserveAspectRatio="xMidYMid slice" dangerouslySetInnerHTML={{ __html: HERO_SVG }} />
   );

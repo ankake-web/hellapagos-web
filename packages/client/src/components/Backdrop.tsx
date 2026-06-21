@@ -1,5 +1,14 @@
-/** 全画面の背景：夕暮れの空・太陽・流れる波（CSS/SVGのみ・外部アセット無し）。 */
+import { BG_ART } from '../assets/manifest.js';
+
+/** 全画面の背景。bg/scene.* の実画像があればそれを敷き、無ければCSS/SVGの夕暮れ（空・太陽・流れる波）を描く。 */
 export function Backdrop() {
+  if (BG_ART.scene) {
+    return (
+      <div className="backdrop" aria-hidden>
+        <img className="bd-photo" src={BG_ART.scene} alt="" />
+      </div>
+    );
+  }
   return (
     <div className="backdrop" aria-hidden>
       <div className="bd-sky" />
