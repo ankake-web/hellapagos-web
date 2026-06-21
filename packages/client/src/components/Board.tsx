@@ -38,10 +38,10 @@ function shipText(s: string): string {
 }
 
 function weatherLabel(v: PublicGameState): string {
-  if (v.hurricaneRevealed) return '🌀 ハリケーン';
-  if (v.currentPrecip === 0) return '☀️ 晴れ（降水0）';
-  if (v.currentPrecip >= 3) return '🌧️ 大雨（降水3）';
-  return `🌦️ 雨（降水${v.currentPrecip}）`;
+  if (v.hurricaneRevealed) return 'ハリケーン';
+  if (v.currentPrecip === 0) return '晴れ（降水0）';
+  if (v.currentPrecip >= 3) return '大雨（降水3）';
+  return `雨（降水${v.currentPrecip}）`;
 }
 
 export function Board({ view, chat, onSay, onLeave }: Props) {
@@ -186,64 +186,32 @@ function Header({ view }: { view: PublicGameState }) {
       <div className="header-right">
         {view.isSpectator && <span className="tag spectate">観戦中</span>}
         <span className="phase-name">{phaseLabel(view)}</span>
-        {left !== null && <span className="timer">⏱ {left}s</span>}
+        {left !== null && <span className="timer">残り{left}s</span>}
       </div>
     </header>
   );
 }
 
+/** 食料・水・船を1行のコンパクトな資源バーにまとめる（大きめのアイコン＋数値／必要数）。 */
 function Tracks({ view }: { view: PublicGameState }) {
   const need = view.seatsNeeded;
   return (
     <div className="tracks">
-      <Track icon="fish" label="食料" value={view.food} need={need} cap={view.foodCap} flyKey="food" />
-      <Track icon="water" label="水" value={view.water} need={need} cap={view.waterCap} flyKey="water" />
-      <div className="track raft" data-fly="raft">
-        <div className="track-head">
-          <span className="tk-label"><GameIcon name="ship" size={20} />船</span>
-          <strong className={view.raftSeats >= need ? 'ok' : 'short'}>{view.raftSeats} / {need}</strong>
-        </div>
-        <div className="raft-bar" title={`木 ${view.raftProgress}/${RAFT_LOOP}`}>
-          {Array.from({ length: RAFT_LOOP }).map((_, i) => (
-            <span key={i} className={`plank ${i < view.raftProgress ? 'on' : ''}`} />
-          ))}
-        </div>
-        <div className="hint-sm">木{RAFT_LOOP}で+1</div>
-      </div>
+      <ResCell icon="fish" value={view.food} need={need} flyKey="food" title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`} />
+      <ResCell icon="water" value={view.water} need={need} flyKey="water" title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`} />
+      <ResCell icon="ship" value={view.raftSeats} need={need} flyKey="raft" raft title={`船 ${view.raftSeats} / ${need}（木${RAFT_LOOP}で+1・進捗${view.raftProgress}/${RAFT_LOOP}）`} />
     </div>
   );
 }
-function Track({ icon, label, value, need, cap, flyKey }: { icon: string; label: string; value: number; need: number; cap: number; flyKey?: string }) {
+function ResCell({ icon, value, need, flyKey, raft, title }: { icon: string; value: number; need: number; flyKey: string; raft?: boolean; title?: string }) {
   const short = value < need;
   return (
-    <div className="track" data-fly={flyKey}>
-      <div className="track-head">
-        <span className="tk-label"><GameIcon name={icon} size={20} />{label}</span>
-        <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}<small> / 必要{need}</small></strong>
+    <div className={`rcell ${raft ? 'raft' : ''} ${short ? 'short' : 'ok'}`} data-fly={flyKey} title={title}>
+      <GameIcon name={icon} size={46} className="rcell-ic" />
+      <div className="rcell-num">
+        <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}</strong>
+        <small>/{need}</small>
       </div>
-      <Pips value={value} need={need} short={short} />
-      <div className="hint-sm">{short ? `あと${need - value}不足` : '充足'}・上限{cap}</div>
-    </div>
-  );
-}
-
-/** 量を「丸の数」で表す。満たしている分は色付き、必要数までの不足分は空の丸。多すぎる分は +N に畳む。 */
-function Pips({ value, need, short }: { value: number; need: number; short: boolean }) {
-  const MAX = 12;
-  const filled = Math.min(value, MAX);
-  // 必要数までは枠（空き）を見せて「あといくつ」を直感的に。必要数を超える余剰は出さない。
-  const empties = Math.max(0, Math.min(need, MAX) - filled);
-  const overflow = value - filled;
-  return (
-    <div className="pips" title={`${value} / 必要${need}`}>
-      {Array.from({ length: filled }).map((_, i) => (
-        <span key={`f${i}`} className={`pip ${short ? 'short' : 'ok'}`} />
-      ))}
-      {Array.from({ length: empties }).map((_, i) => (
-        <span key={`e${i}`} className="pip empty" />
-      ))}
-      {overflow > 0 && <span className="pip-more">+{overflow}</span>}
-      {value === 0 && empties === 0 && <span className="pip-more">0</span>}
     </div>
   );
 }
@@ -264,19 +232,19 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
   return (
     <div className={`pcard ${dead ? 'dead' : ''} ${p.escaped ? 'escaped' : ''} ${isActor ? 'actor' : ''} ${targetable ? 'targetable' : ''}`} data-pid={p.id} onClick={targetable ? onPick : undefined}>
       <div className="pcard-top">
-        {p.isYou && ART['you'] ? <img className="pc-avatar" src={ART['you']} alt="" /> : <span className="pc-face">{p.isBot ? '🤖' : '🧍'}</span>}
+        {p.isYou && ART['you'] ? <img className="pc-avatar" src={ART['you']} alt="" /> : p.isBot ? <span className="pc-face bot">CPU</span> : null}
         <span className="pname">{p.name}</span>
         {p.id === view.hostId && <span className="tag host">主</span>}
         {p.isYou && <span className="tag you">自</span>}
       </div>
       <div className="pcard-status">
         {myDraw && <Balls balls={myDraw.balls} action={myDraw.action} small />}
-        {p.escaped && <span className="badge escape">脱出🛶</span>}
-        {dead && <span className="badge death">死亡💀</span>}
-        {p.sick && p.alive && <span className="badge sick">病気🐍</span>}
-        {p.resting && p.alive && <span className="badge sick">休み💤</span>}
+        {p.escaped && <span className="badge escape">脱出</span>}
+        {dead && <span className="badge death">死亡</span>}
+        {p.sick && p.alive && <span className="badge sick">病気</span>}
+        {p.resting && p.alive && <span className="badge sick">休み</span>}
         {!myDraw && !dead && !p.escaped && isActor && view.phase === 'action' && <span className="badge actor">手番</span>}
-        {!dead && !p.escaped && p.acted && view.phase === 'action' && <span className="badge done">✓</span>}
+        {!dead && !p.escaped && p.acted && view.phase === 'action' && <span className="badge done">済</span>}
       </div>
       <div className="pcard-foot">
         <span className="stash">手札 {p.handCount}</span>
@@ -288,7 +256,7 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
 }
 
 function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) {
-  if (view.isSpectator) return <div className="panel spectate">👀 観戦中。生存者たちの選択を見守りましょう。</div>;
+  if (view.isSpectator) return <div className="panel spectate">観戦中。生存者たちの選択を見守りましょう。</div>;
   if (!me || (!me.alive && !me.escaped)) return <div className="panel spectate">あなたは脱落しました。結末を見届けましょう…</div>;
   if (me.escaped) return <div className="panel spectate">あなたは脱出しました！</div>;
 
@@ -308,7 +276,7 @@ function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) 
 
 function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   const [wood, setWood] = useState(0);
-  if (me.resting) return <div className="panel">💤 ヘビの毒で今ラウンドは動けません。</div>;
+  if (me.resting) return <div className="panel">ヘビの毒で今ラウンドは動けません。</div>;
   if (!view.isYourTurn) {
     const actor = view.players.find((p) => p.id === view.currentActorId);
     return <div className="panel"><h3>行動フェイズ</h3><p className="hint">{actor ? `${actor.name} の手番です…` : '進行中…'}</p></div>;
@@ -317,19 +285,23 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
     <div className="panel yourturn">
       <h3>あなたの番です — 行動を選ぶ</h3>
       <div className="action-grid">
-        <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}><GameIcon name={ACTION_ICON.fish} size={32} /><span className="act-name">{ACTION_LABEL.fish}</span><span className="sub">袋から1玉・魚1〜3（不漁あり）</span></button>
-        <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}><GameIcon name={ACTION_ICON.water} size={32} /><span className="act-name">{ACTION_LABEL.water}</span><span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
-        <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}><GameIcon name={ACTION_ICON.search} size={32} /><span className="act-name">{ACTION_LABEL.search}</span><span className="sub">カードを1枚引く</span></button>
+        <div className="action-row3">
+          <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}><GameIcon name={ACTION_ICON.fish} size={34} /><span className="act-name">{ACTION_LABEL.fish}</span><span className="sub">袋から1玉・魚1〜3</span></button>
+          <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}><GameIcon name={ACTION_ICON.water} size={34} /><span className="act-name">{ACTION_LABEL.water}</span><span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
+          <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}><GameIcon name={ACTION_ICON.search} size={34} /><span className="act-name">{ACTION_LABEL.search}</span><span className="sub">カードを1枚引く</span></button>
+        </div>
         <div className="btn action wood-action">
-          <GameIcon name={ACTION_ICON.wood} size={32} /><span className="act-name">{ACTION_LABEL.wood}</span>
-          <span className="sub">まず木1本（斧で2本）確定</span>
+          <div className="wood-head">
+            <GameIcon name={ACTION_ICON.wood} size={40} />
+            <div className="wood-head-txt"><span className="act-name">{ACTION_LABEL.wood}</span><span className="sub">まず木1本（斧で2本）確定。さらに引くとヘビ（病気）の危険。</span></div>
+          </div>
           <div className="wood-push">
             <label>さらに引く本数：{wood} 本（0〜5）<input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
-            <button className="btn primary small" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>{wood > 0 ? `確定：1本＋${wood}本引く` : '確定：木1本だけ取る'}</button>
+            <button className="btn primary" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>{wood > 0 ? `確定：1本＋${wood}本引く` : '確定：木1本だけ取る'}</button>
           </div>
         </div>
       </div>
-      <p className="hint">🐍ヘビ（黒玉）に噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると病気で次ラウンド休み＆追加分は無し。釣りの黒玉は「不漁」で病気にはなりません。</p>
+      <p className="hint">ヘビ（黒玉）に噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると病気で次ラウンド休み＆追加分は無し。釣りの黒玉は「不漁」で病気にはなりません。</p>
     </div>
   );
 }
@@ -376,7 +348,7 @@ function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
       <p>船{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
       <div className="panel-actions">
         <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>まだ残る</button>
-        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>🛶 出航する！</button>
+        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>出航する！</button>
       </div>
     </div>
   );
@@ -388,7 +360,6 @@ function HandBar({ me, onSelect }: { me?: PublicPlayer; onSelect: (card: Card) =
   if (!me || !me.alive || me.escaped || hand.length === 0) return null;
   return (
     <div className="hand-bar">
-      <span className="hand-bar-label">🎴 手札<small>{hand.length}</small></span>
       <div className="hand-bar-cards">
         {hand.map((c) => {
           const info = CARD_INFO[c.kind];
@@ -552,7 +523,7 @@ function RoundSplash({ view }: { view: PublicGameState }) {
     <div className="weather-reveal" aria-hidden>
       <div className={`wr-card ${wClass}`}>
         <span className="wr-round">{view.round}ラウンド目</span>
-        <GameIcon name={wxName} size={88} className="wr-icon" />
+        <GameIcon name={wxName} size={104} className="wr-icon" />
         <span className="wr-weather">{weatherLabel(view)}</span>
         {view.hurricaneRevealed && <span className="wr-storm">本ラウンドで強制脱出！</span>}
       </div>

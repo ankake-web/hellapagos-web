@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { NAME_POOL } from '@hellapagos/shared';
 import type { Stats } from '../stats.js';
-import { HeroArt } from '../assets/icons.js';
 import { Rules } from './Rules.js';
 import { Leaderboard } from './Leaderboard.js';
 
@@ -27,16 +26,15 @@ export function Home({ onCreate, onJoin, stats }: Props) {
   return (
     <div className="home">
       <div className="home-card">
-        <HeroArt className="hero" />
         <h1>ヘルパゴス</h1>
         <p className="subtitle">無人島ニセ協力サバイバル。<br />嵐が来る前に、いかだで脱出せよ。</p>
 
         <div className="home-links">
           <button className="btn ghost small" onClick={() => setShowRules(true)}>
-            📖 遊び方
+            遊び方
           </button>
           <button className="btn ghost small" onClick={() => setShowRanking(true)}>
-            🏆 ランキング
+            ランキング
           </button>
         </div>
 
@@ -50,7 +48,7 @@ export function Home({ onCreate, onJoin, stats }: Props) {
               onChange={(e) => setName(e.target.value)}
             />
             <button type="button" className="btn ghost small" title="ランダムな名前" onClick={() => setName(suggestName())}>
-              🎲
+              別名
             </button>
           </div>
         </label>
@@ -91,8 +89,8 @@ export function Home({ onCreate, onJoin, stats }: Props) {
         {stats.games > 0 && (
           <div className="stats">
             <span>通算 {stats.games} 戦</span>
-            <span>🛶 脱出 {stats.escapes}</span>
-            <span>🏆 勝利 {stats.wins}</span>
+            <span>脱出 {stats.escapes}</span>
+            <span>勝利 {stats.wins}</span>
             <span>
               脱出率 {Math.round((stats.escapes / stats.games) * 100)}%
             </span>

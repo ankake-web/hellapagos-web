@@ -23,9 +23,9 @@
   --escape: #5fc8f5;
   --line: rgba(255, 255, 255, 0.12);
   --line-strong: rgba(255, 255, 255, 0.22);
-  --glass: rgba(11, 36, 44, 0.55);
-  --glass-2: rgba(20, 54, 64, 0.62);
-  --glass-3: rgba(28, 70, 82, 0.66);
+  --glass: rgba(11, 36, 44, 0.40);
+  --glass-2: rgba(18, 50, 60, 0.46);
+  --glass-3: rgba(26, 66, 78, 0.52);
   /* 上面に光沢を足すガラスのシーン（パネル背景に重ねる） */
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 42%);
   --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.3);
@@ -70,7 +70,7 @@ h1, h2, h3, h4 { margin: 0; }
 /* 周辺減光：中央へ視線を集める */
 .backdrop::before {
   content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
-  background: radial-gradient(125% 95% at 50% 30%, transparent 50%, rgba(2, 12, 16, 0.42) 100%);
+  background: radial-gradient(135% 100% at 50% 32%, transparent 58%, rgba(2, 12, 16, 0.28) 100%);
 }
 .bd-sky {
   position: absolute; inset: 0;
@@ -228,8 +228,18 @@ h1, h2, h3, h4 { margin: 0; }
 .hand-bar .card-chip { min-width: 60px; padding: 0.4rem 0.5rem 0.36rem; }
 .hand-bar .card-chip .card-ic { font-size: 1.2rem; }
 
-.tracks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.7rem; }
-@media (max-width: 560px) { .tracks { grid-template-columns: 1fr; } }
+/* 食料・水・船：1行のコンパクトな資源バー（大きめアイコン＋数値/必要数） */
+.tracks { display: flex; gap: 0.5rem; }
+.rcell { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.35rem 0.4rem; background: var(--sheen), var(--glass-2); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+.rcell.short { border-color: rgba(255, 111, 111, 0.45); }
+.rcell-ic { flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45)); }
+.rcell-num { display: flex; align-items: baseline; gap: 0.08rem; line-height: 1; }
+.rcell-num strong { font-size: 1.65rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rcell-num strong.ok { color: var(--good); }
+.rcell-num strong.short { color: var(--danger); }
+.rcell.raft .rcell-num strong.ok { color: var(--sand); }
+.rcell-num small { color: var(--muted); font-size: 0.8rem; }
+@media (max-width: 560px) { .tracks { gap: 0.35rem; } .rcell { padding: 0.3rem 0.2rem; gap: 0.18rem; } .rcell-num strong { font-size: 1.4rem; } }
 .track { padding: 0.7rem 0.9rem; }
 .track-head { display: flex; justify-content: space-between; align-items: baseline; }
 .track-head span { font-size: 0.9rem; }
@@ -283,25 +293,30 @@ h1, h2, h3, h4 { margin: 0; }
 .panel.spectate { color: var(--muted); text-align: center; }
 @keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
-.action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.7rem; align-items: start; }
-/* スマホでも4つの行動を 2×2 の「4分割」で表示（1列に潰さない） */
-@media (max-width: 520px) {
-  .action-grid { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-  .btn.action { min-height: 60px; padding: 0.7rem 0.5rem; font-size: 0.92rem; }
-  .btn.action .sub { font-size: 0.6rem; }
-}
+/* 行動：上段に3つ（釣り/水汲み/難破船）を横並び、下に「木集め」を大きく1枚 */
+.action-grid { display: flex; flex-direction: column; gap: 0.6rem; }
+.action-row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
 .btn.action {
-  display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 1rem 0.8rem; font-size: 1.05rem; min-height: 78px;
+  display: flex; flex-direction: column; align-items: center; gap: 0.22rem; padding: 0.9rem 0.6rem; font-size: 1.02rem; min-height: 78px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.02));
   transition: transform 0.1s var(--ease), background 0.15s, box-shadow 0.15s;
 }
 .btn.action:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32); background: linear-gradient(180deg, rgba(255, 200, 120, 0.16), rgba(255, 255, 255, 0.03)); }
 .btn.action:active:not(:disabled) { transform: translateY(1px); }
-.btn.action .sub { font-size: 0.68rem; color: var(--muted); font-weight: 500; }
-.wood-action { cursor: default; background: rgba(0, 0, 0, 0.22); }
-.wood-push { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.5rem; width: 100%; }
-.wood-push label { font-size: 0.72rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.btn.action .sub { font-size: 0.68rem; color: var(--muted); font-weight: 500; line-height: 1.25; }
+/* 木集め：横長の大きいパネル */
+.wood-action { cursor: default; align-items: stretch; gap: 0.5rem; padding: 0.85rem 0.9rem; background: linear-gradient(180deg, rgba(135, 87, 51, 0.22), rgba(0, 0, 0, 0.12)); }
+.wood-head { display: flex; align-items: center; gap: 0.6rem; text-align: left; }
+.wood-head svg { flex-shrink: 0; }
+.wood-head-txt { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.wood-head-txt .act-name { font-size: 1.15rem; }
+.wood-push { display: flex; flex-direction: column; gap: 0.4rem; width: 100%; }
+.wood-push label { font-size: 0.74rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .wood-push input[type=range] { accent-color: var(--sun-2); }
+@media (max-width: 520px) {
+  .action-row3 .btn.action { min-height: 66px; padding: 0.7rem 0.4rem; font-size: 0.92rem; }
+  .action-row3 .btn.action .sub { font-size: 0.58rem; }
+}
 .panel-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 0.7rem; flex-wrap: wrap; }
 .vote-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
 .btn.vote { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
@@ -611,9 +626,10 @@ html.fx-shake .board { animation: shake 0.46s ease-in-out; }
 /* 自分の肖像アバター（プレイヤーカード） */
 .pc-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; object-position: center top; flex-shrink: 0; border: 1.5px solid var(--sun); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); background: rgba(0, 0, 0, 0.25); }
 .pc-face { flex-shrink: 0; }
+.pc-face.bot { font-size: 0.54rem; font-weight: 800; letter-spacing: 0.04em; color: var(--muted); background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line); border-radius: 6px; padding: 0.1rem 0.3rem; }
 
 /* 結末画面の大きな挿絵 */
-.result-art { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; margin-bottom: 0.9rem; display: block; box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
+.result-art { width: 100%; height: auto; object-fit: contain; border-radius: 14px; margin-bottom: 0.9rem; display: block; box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
 
 /* ===== 資源・カード獲得：飛んでいくトークン ===== */
 .fly-layer { position: fixed; inset: 0; z-index: 17; pointer-events: none; }
