@@ -9,8 +9,9 @@ import {
   addPlayer,
   aiAction,
   aiChatLine,
+  aiBeforeAction,
+  aiConchPlays,
   aiEscape,
-  aiPermanentPlays,
   aiSurvivalPlays,
   aiVote,
   alivePlayers,
@@ -293,6 +294,12 @@ export class LocalRunner {
             const r = rngFor(this.state, p.id.charCodeAt(p.id.length - 1));
             this.state = castVote(this.state, p.id, intent ?? aiVote(this.state, this.live(p.id)!, r));
           }
+          // 不利な投票を受けるCPUはほら貝で無効化する
+          const conchs = aiConchPlays(this.state);
+          if (conchs.length) {
+            for (const cp of conchs) this.state = playCard(this.state, cp.playerId, cp.cardId);
+            continue;
+          }
         }
         if (isVoteReady(this.state)) {
           this.state = resolveVote(this.state);
@@ -338,8 +345,8 @@ export class LocalRunner {
         this.drive();
         return;
       }
-      // 受動の永続は「発動」して初めて効果が出る → 持っていれば先に発動する
-      for (const id of aiPermanentPlays(bot)) this.state = playCard(this.state, botId, id);
+      // 手番前に使うカード（永続の発動・人肉BBQ等）を先に処理する
+      for (const id of aiBeforeAction(this.state, bot)) this.state = playCard(this.state, botId, id);
       bot = this.live(botId)!;
       const decision = aiAction(this.state, bot, rngFor(this.state, botId.length));
       if (bot.botPersona && r.chance(0.25)) {

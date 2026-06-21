@@ -40,6 +40,7 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
     raftSeats: s.raftSeats,
     raftProgress: s.raftProgress,
     seatsNeeded: aliveCount(s),
+    bodiesAvailable: s.bodiesAvailable ?? 0,
     currentPrecip: s.currentPrecip,
     hurricaneRevealed: s.hurricaneRevealed,
     weatherRemaining: s.weatherDeck.length,
@@ -57,5 +58,7 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
     config: s.config,
     lastDraw: s.lastDraw,
     lastGain: s.lastGain,
+    // 望遠鏡でのぞいた手札は、のぞいた本人にだけ届ける
+    peek: s.lastPeek && s.lastPeek.byId === viewerId ? { targetName: s.lastPeek.targetName, hand: s.lastPeek.hand } : undefined,
   };
 }

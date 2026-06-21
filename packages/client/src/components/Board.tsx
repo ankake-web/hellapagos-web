@@ -46,7 +46,7 @@ function weatherLabel(v: PublicGameState): string {
 
 export function Board({ view, chat, onSay, onLeave }: Props) {
   const me = view.players.find((p) => p.isYou);
-  const [targeting, setTargeting] = useState<{ card: Card; mode: 'gun' | 'voodoo' } | null>(null);
+  const [targeting, setTargeting] = useState<{ card: Card; mode: 'gun' | 'voodoo' | 'telescope' } | null>(null);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [tab, setTab] = useState<'log' | 'chat'>('log');
   const freshDraw = useFreshDraw(view);
@@ -55,8 +55,8 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
 
   const targetable = (p: PublicPlayer): boolean => {
     if (!targeting) return false;
-    if (targeting.mode === 'gun') return p.alive && !p.escaped && !p.isYou;
-    return !p.alive && !p.escaped; // voodoo
+    if (targeting.mode === 'voodoo') return !p.alive && !p.escaped; // 死者を蘇生
+    return p.alive && !p.escaped && !p.isYou; // gun / telescope は生存中の他人
   };
   const pickTarget = (p: PublicPlayer) => {
     if (!targeting || !targetable(p)) return;
@@ -78,7 +78,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
       <FlyLayer view={view} />
       {targeting && (
         <div className="banner target">
-          <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} /> {targeting.mode === 'gun' ? '撃つ相手' : '蘇生する相手'}を選択
+          <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} /> {targeting.mode === 'gun' ? '撃つ相手' : targeting.mode === 'telescope' ? 'のぞき見る相手' : '蘇生する相手'}を選択
           <button className="btn ghost small" onClick={() => setTargeting(null)}>キャンセル</button>
         </div>
       )}
@@ -109,6 +109,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           }}
         />
       )}
+      <PeekModal peek={view.peek} />
       {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} />}
     </div>
   );
@@ -439,15 +440,26 @@ function cardUsable(view: PublicGameState, me: PublicPlayer, c: Card): { ok: boo
       : { ok: false, reason: '自分の手番（行動フェイズ）で使うと発動し、以後ずっと効果が続きます。' };
   if (cat === 'junk') return { ok: false, reason: '使えません。手札に残るので「カードを使わない＝何を持っているか怪しまれる」状況を作ります。' };
   if (k === 'bullet') return { ok: false, reason: '銃と一緒に使います（単体では使えません）。' };
+  if (k === 'tin_sheet') return { ok: false, reason: '銃で撃たれた時に自動で1回だけ防ぎます（自分から使う必要はありません）。' };
   if (cat === 'resource') {
+    if (k === 'fruit_basket')
+      return phase === 'survival' ? { ok: true } : { ok: false, reason: '不足の救済専用：生存チェック中だけ使えます（脱出の補給には使えません）。' };
     if (phase === 'vote') return { ok: true };
     return phase === 'survival' || phase === 'action'
       ? { ok: true }
       : { ok: false, reason: 'いまは使えません（行動/生存/投票フェイズで）。' };
   }
   if (k === 'serum') return me.sick ? { ok: true } : { ok: false, reason: '病気のときだけ使えます。' };
-  if (k === 'voodoo' || k === 'sleeping_pills' || k === 'alarm_clock')
+  if (k === 'voodoo' || k === 'sleeping_pills' || k === 'alarm_clock' || k === 'telescope')
     return phase === 'action' && view.isYourTurn ? { ok: true } : { ok: false, reason: '自分の手番（行動フェイズ）で使えます。' };
+  if (k === 'matches')
+    return phase === 'action' || phase === 'survival' || phase === 'vote'
+      ? { ok: true }
+      : { ok: false, reason: '汚れた水/腐った魚を使う前に使えます。' };
+  if (k === 'cannibal_bbq')
+    return (view.bodiesAvailable ?? 0) > 0 ? { ok: true } : { ok: false, reason: '脱落者（死体）がいる時だけ使えます。' };
+  if (k === 'conch')
+    return phase === 'vote' ? { ok: true } : { ok: false, reason: '追放投票が進行中のときに使えます。' };
   if (k === 'gun') {
     if (!(me.hand ?? []).some((x) => x.kind === 'bullet')) return { ok: false, reason: '弾が必要です。' };
     return phase === 'action' || phase === 'vote' ? { ok: true } : { ok: false, reason: '行動フェイズか投票中に使えます。' };
@@ -467,14 +479,16 @@ function ItemModal({
   me: PublicPlayer;
   card: Card;
   onClose: () => void;
-  onUse: (card: Card, mode: 'gun' | 'voodoo' | null) => void;
+  onUse: (card: Card, mode: 'gun' | 'voodoo' | 'telescope' | null) => void;
 }) {
   const info = CARD_INFO[card.kind];
   const u = cardUsable(view, me, card);
+  const targeted = card.kind === 'gun' || card.kind === 'voodoo' || card.kind === 'telescope';
   const use = () => {
     if (!u.ok) return;
     if (card.kind === 'gun') return onUse(card, 'gun');
     if (card.kind === 'voodoo') return onUse(card, 'voodoo');
+    if (card.kind === 'telescope') return onUse(card, 'telescope');
     playSound('click');
     api.playCard(card.id);
     onClose();
@@ -496,9 +510,43 @@ function ItemModal({
         <div className="panel-actions">
           <button className="btn ghost" onClick={onClose}>やめる</button>
           <button className="btn primary" disabled={!u.ok} onClick={use}>
-            {card.kind === 'gun' || card.kind === 'voodoo' ? '使う（相手を選ぶ）' : '使う'}
+            {targeted ? '使う（相手を選ぶ）' : '使う'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** 望遠鏡でのぞいた相手の手札を本人にだけ見せるモーダル。 */
+function PeekModal({ peek }: { peek: PublicGameState['peek'] }) {
+  const [closed, setClosed] = useState(false);
+  const sig = peek ? `${peek.targetName}:${peek.hand.map((h) => h.id).join(',')}` : '';
+  const ref = useRef('');
+  useEffect(() => {
+    if (sig && sig !== ref.current) {
+      ref.current = sig;
+      setClosed(false);
+    }
+  }, [sig]);
+  if (!peek || closed) return null;
+  return (
+    <div className="overlay" onClick={() => setClosed(true)}>
+      <div className="modal item-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>🔭 {peek.targetName} の手札</h3>
+        <div className="hand-cards" style={{ justifyContent: 'center' }}>
+          {peek.hand.length === 0 && <p className="hint">手札なし</p>}
+          {peek.hand.map((c) => {
+            const info = CARD_INFO[c.kind];
+            return (
+              <div key={c.id} className={`card-chip cat-${info.cat}`} title={info.desc}>
+                <GameIcon className="card-ic" name={c.kind} size={30} fallback={info.icon} />
+                <span className="card-nm">{info.name}</span>
+              </div>
+            );
+          })}
+        </div>
+        <button className="btn primary block" onClick={() => setClosed(true)}>閉じる</button>
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ export type Speed = 'slow' | 'normal' | 'fast';
 export type CardKind =
   // 資源
   | 'water_bottle'
+  | 'coconut'
   | 'dirty_water'
   | 'sandwich'
   | 'sardine_can'
@@ -29,13 +30,20 @@ export type CardKind =
   | 'voodoo'
   | 'sleeping_pills'
   | 'alarm_clock'
+  | 'telescope'
+  | 'matches'
+  | 'cannibal_bbq'
+  | 'conch'
   // 永続
   | 'canteen'
   | 'fishing_rod'
   | 'axe'
   | 'crystal_ball'
+  | 'club'
   | 'gun'
+  // 併用・防御
   | 'bullet'
+  | 'tin_sheet'
   // 無用品
   | 'junk';
 
@@ -66,6 +74,8 @@ export interface Player {
   vote?: string | null;
   /** その投票で資源カードを自分に使って身を守った（追放を免れる）。投票ごとにリセット */
   voteSafe?: boolean;
+  /** マッチ使用中：次に消費する汚れた水/腐った魚の「病気」を無効化。使用で消える */
+  matchSafe?: boolean;
   /** 脱出フェイズの賛否（未回答=undefined） */
   escapeChoice?: boolean;
   /** 直近の投票で集めた票（表示用） */
@@ -129,6 +139,9 @@ export interface GameState {
   nextParentId?: string | null; // 目覚まし時計で指定された次の親
   fruitUsed?: boolean; // 当ラウンドにフルーツバスケットで死者ゼロ確定
   lastWoodGain?: { playerId: string; amount: number }; // 直近の木集めで得た木（血清で失う）
+  roundDeaths?: number; // 当ラウンドの脱落者数（人肉BBQ用・beginRoundでリセット）
+  bodiesAvailable?: number; // まだ食べていない死体（人肉BBQで食料化・beginRoundでリセット）
+  lastPeek?: { byId: string; targetId: string; targetName: string; hand: Card[] }; // 望遠鏡：本人だけに見せる
   // ログ・結果
   log: LogEntry[];
   logSeq: number;
@@ -174,6 +187,7 @@ export interface PublicGameState {
   raftSeats: number;
   raftProgress: number;
   seatsNeeded: number; // = 生存者数
+  bodiesAvailable: number; // まだ食べていない死体（人肉BBQが使えるか）
   currentPrecip: number;
   hurricaneRevealed: boolean;
   weatherRemaining: number;
@@ -191,6 +205,8 @@ export interface PublicGameState {
   config: GameConfig;
   lastDraw?: GameState['lastDraw'];
   lastGain?: GameState['lastGain'];
+  /** 望遠鏡で覗いた相手の手札（覗いた本人にのみ届く） */
+  peek?: { targetName: string; hand: Card[] };
   deadlineAt?: number;
 }
 

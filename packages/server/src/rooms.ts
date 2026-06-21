@@ -10,9 +10,10 @@ import {
   Rng,
   addPlayer,
   aiAction,
+  aiBeforeAction,
   aiChatLine,
+  aiConchPlays,
   aiEscape,
-  aiPermanentPlays,
   aiSurvivalPlays,
   aiVote,
   alivePlayers,
@@ -382,6 +383,12 @@ export class RoomManager {
             const r = rngFor(room.state, p.id.charCodeAt(p.id.length - 1));
             room.state = castVote(room.state, p.id, intent ?? aiVote(room.state, this.live(room, p.id)!, r));
           }
+          // 不利な投票を受けるCPUはほら貝で無効化する
+          const conchs = aiConchPlays(room.state);
+          if (conchs.length) {
+            for (const cp of conchs) room.state = playCard(room.state, cp.playerId, cp.cardId);
+            continue;
+          }
         }
         if (isVoteReady(room.state)) {
           room.state = resolveVote(room.state);
@@ -440,8 +447,8 @@ export class RoomManager {
         this.drive(room);
         return;
       }
-      // 受動の永続は「発動」して初めて効果が出る → 持っていれば先に発動する
-      for (const id of aiPermanentPlays(bot)) room.state = playCard(room.state, botId, id);
+      // 手番前に使うカード（永続の発動・人肉BBQ等）を先に処理する
+      for (const id of aiBeforeAction(room.state, bot)) room.state = playCard(room.state, botId, id);
       bot = this.live(room, botId)!;
       const decision = aiAction(room.state, bot, rngFor(room.state, botId.length));
       // たまにセリフ

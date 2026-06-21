@@ -3,11 +3,50 @@ import { aliveCount, hasPermanent } from './engine.js';
 import { Rng } from './rng.js';
 import type { ActionType, BotPersona, CardKind, Difficulty, GameState, Player } from './types.js';
 
-const PASSIVE_PERMS: readonly CardKind[] = ['axe', 'fishing_rod', 'canteen', 'crystal_ball'];
-/** 受動の永続は所持しているだけでは無効になったので、CPUは手番で即「発動」する。
- *  発動すべきカードIDの配列を返す（呼び出し側が playCard で順に適用）。 */
+const PASSIVE_PERMS: readonly CardKind[] = ['axe', 'fishing_rod', 'canteen', 'crystal_ball', 'club'];
+/** 受動の永続は所持しているだけでは無効になったので、CPUは手番で即「発動」する。 */
 export function aiPermanentPlays(p: Player): string[] {
   return p.hand.filter((c) => PASSIVE_PERMS.includes(c.kind) && !p.revealed.includes(c.kind)).map((c) => c.id);
+}
+
+/** CPUが自分の手番(行動フェイズ)の前に使うカードIDの配列。永続の発動＋人肉BBQ等。 */
+export function aiBeforeAction(s: GameState, p: Player): string[] {
+  const ids = aiPermanentPlays(p);
+  // 死体があり、食料が不安なら人肉BBQで食料化
+  if ((s.bodiesAvailable ?? 0) > 0 && s.food < aliveCount(s) + 1) {
+    const bbq = p.hand.find((c) => c.kind === 'cannibal_bbq');
+    if (bbq) ids.push(bbq.id);
+  }
+  return ids;
+}
+
+/** 投票で「自分が追放されそう」なCPUがほら貝を吹いて無効化する番。返り値は {playerId, cardId} の配列。 */
+export function aiConchPlays(s: GameState): Array<{ playerId: string; cardId: string }> {
+  if (s.phase !== 'vote') return [];
+  const alive = s.players.filter((p) => p.alive && !p.escaped);
+  // 簡易集計（棍棒重みは無視した概算で十分）
+  const tally = new Map<string, number>();
+  for (const v of alive) if (!v.sick && v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + 1);
+  let max = 0;
+  let victim: Player | undefined;
+  for (const p of alive) {
+    const n = tally.get(p.id) ?? 0;
+    if (n > max) {
+      max = n;
+      victim = p;
+    }
+  }
+  if (!victim || max <= 0) return [];
+  // 被害者がCPU/未接続で、自己救済できず、ほら貝を持っているなら吹く
+  const isAuto = victim.isBot || !victim.connected;
+  if (!isAuto || victim.voteSafe) return [];
+  const reason = s.voteReason;
+  const hasSave = reason === 'water'
+    ? victim.hand.some((c) => c.kind === 'coconut' || c.kind === 'water_bottle' || c.kind === 'dirty_water')
+    : victim.hand.some((c) => c.kind === 'sardine_can' || c.kind === 'sandwich' || c.kind === 'rotten_fish');
+  if (hasSave) return [];
+  const conch = victim.hand.find((c) => c.kind === 'conch');
+  return conch ? [{ playerId: victim.id, cardId: conch.id }] : [];
 }
 
 /**
@@ -70,7 +109,10 @@ export function aiSurvivalPlays(s: GameState, p: Player): string[] {
 
   const ids: string[] = [];
   for (const c of [...p.hand]) {
-    if (waterDeficit > 0 && (c.kind === 'water_bottle')) {
+    if (waterDeficit > 0 && c.kind === 'coconut') {
+      ids.push(c.id);
+      waterDeficit -= 3;
+    } else if (waterDeficit > 0 && c.kind === 'water_bottle') {
       ids.push(c.id);
       waterDeficit -= 1;
     } else if (foodDeficit > 0 && c.kind === 'sardine_can') {

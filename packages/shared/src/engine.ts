@@ -2,7 +2,6 @@ import {
   BAG,
   DEFAULT_CONFIG,
   MAX_SEATS,
-  PERMANENT_KINDS,
   RAFT_LOOP,
   RESOURCE_CAP,
   buildWeatherDeck,
@@ -12,6 +11,7 @@ import {
   initialSupplies,
   isSnake,
 } from './content.js';
+import { CANNIBAL_FOOD_PER_BODY, CLUB_VOTE_WEIGHT, COCONUT_WATER, SARDINE_FOOD } from './deckConfig.js';
 import { Rng } from './rng.js';
 import type {
   ActionType,
@@ -211,9 +211,12 @@ function beginRound(d: GameState): GameState {
     p.acted = false;
     p.vote = undefined;
     p.escapeChoice = undefined;
+    p.matchSafe = false; // マッチの効果はラウンドをまたがない
   }
   d.fruitUsed = false;
   d.lastWoodGain = undefined;
+  d.roundDeaths = 0; // 「そのラウンドの脱落者数」をリセット（死体 bodiesAvailable は食べるまで残す）
+  d.lastPeek = undefined;
   // 天候公開
   const card = d.weatherDeck.shift();
   if (card) {
@@ -447,9 +450,9 @@ export function isVoteReady(s: GameState): boolean {
 export function resolveVote(s: GameState): GameState {
   if (s.phase !== 'vote') return s;
   const d = clone(s);
-  // 集計
+  // 集計（棍棒を装備していれば自分の票は CLUB_VOTE_WEIGHT 票として数える）
   const tally = new Map<string, number>();
-  for (const v of eligibleVoters(d)) if (v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + 1);
+  for (const v of eligibleVoters(d)) if (v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + (hasPermanent(v, 'club') ? CLUB_VOTE_WEIGHT : 1));
   for (const p of d.players) (p as { votesReceived?: number }).votesReceived = tally.get(p.id) ?? 0;
 
   const candidates = alivePlayers(d);
@@ -512,7 +515,7 @@ function afterVoteBatch(d: GameState): GameState {
 }
 
 function resourceWaterCard(p: Player): CardKind | undefined {
-  for (const k of ['water_bottle', 'dirty_water'] as CardKind[]) if (hasCard(p, k)) return k;
+  for (const k of ['coconut', 'water_bottle', 'dirty_water'] as CardKind[]) if (hasCard(p, k)) return k;
   return undefined;
 }
 function resourceFoodCard(p: Player): CardKind | undefined {
@@ -525,25 +528,37 @@ function removeOneCard(p: Player, kind: CardKind): void {
   if (i >= 0) p.hand.splice(i, 1);
 }
 
+/** 汚れた水/腐った魚の「病気」を付与する。ただしマッチを使っていれば1回だけ無効化する。 */
+function applySickUnlessMatch(p: Player): void {
+  if (p.matchSafe) {
+    p.matchSafe = false; // マッチで安全に消費（使い切り）
+    return;
+  }
+  p.sick = true;
+}
+
 /** 資源カードをプールへ反映（自己救済・生存ウィンドウ共通） */
 function applyResourceCard(d: GameState, p: Player, kind: CardKind): void {
   switch (kind) {
     case 'water_bottle':
       d.water = clampSupply(d.water + 1);
       break;
+    case 'coconut':
+      d.water = clampSupply(d.water + COCONUT_WATER);
+      break;
     case 'dirty_water':
       d.water = clampSupply(d.water + 1);
-      p.sick = true;
+      applySickUnlessMatch(p);
       break;
     case 'sandwich':
       d.food = clampSupply(d.food + 1);
       break;
     case 'sardine_can':
-      d.food = clampSupply(d.food + 3);
+      d.food = clampSupply(d.food + SARDINE_FOOD);
       break;
     case 'rotten_fish':
       d.food = clampSupply(d.food + 1);
-      p.sick = true;
+      applySickUnlessMatch(p);
       break;
     case 'fruit_basket':
       d.food = 0;
@@ -559,7 +574,7 @@ function applyResourceCard(d: GameState, p: Player, kind: CardKind): void {
 /** 自己救済：資源カードを自分の配給として消費（プールには入れない）。 */
 function consumeCardForSelf(p: Player, kind: CardKind): void {
   removeOneCard(p, kind);
-  if (kind === 'dirty_water' || kind === 'rotten_fish') p.sick = true;
+  if (kind === 'dirty_water' || kind === 'rotten_fish') applySickUnlessMatch(p);
 }
 
 /** 資源0で迎えたとき：該当カードを出せた者だけ生存、他は死亡（投票なし）。 */
@@ -580,6 +595,8 @@ function cardOrDie(d: GameState, reason: 'water' | 'food'): void {
 /** 脱落処理：手札を両隣へ交互配布（銃も含め場に残す）。ログは呼び出し側。 */
 function killPlayer(d: GameState, victim: Player): void {
   victim.alive = false;
+  d.roundDeaths = (d.roundDeaths ?? 0) + 1; // 当ラウンドの脱落者数（人肉BBQ用）
+  d.bodiesAvailable = (d.bodiesAvailable ?? 0) + 1; // まだ食べていない死体
   const idx = d.players.indexOf(victim);
   const left = findNeighbor(d, idx, -1);
   const right = findNeighbor(d, idx, +1);
@@ -615,17 +632,20 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
 
   switch (c.kind) {
     case 'water_bottle':
+    case 'coconut':
     case 'dirty_water':
     case 'sandwich':
     case 'sardine_can':
     case 'rotten_fish':
     case 'fruit_basket': {
       if (d.phase !== 'survival' && d.phase !== 'action' && d.phase !== 'vote') return s;
+      // フルーツバスケットは不足を相殺する救済専用：生存チェック以外では使えない（脱出の航海用補給にも使えない）。
+      if (c.kind === 'fruit_basket' && d.phase !== 'survival') return s;
       if (d.phase === 'vote') {
         // 投票中：自分の配給として消費し「自分だけ」追放を免れる（プールには入れない）。
         // 救えるのは投票理由に合う資源のみ（水不足→水カード／食料不足・ハリケーン→食料カード）。
         const reason = d.voteReason;
-        const water = c.kind === 'water_bottle' || c.kind === 'dirty_water';
+        const water = c.kind === 'water_bottle' || c.kind === 'coconut' || c.kind === 'dirty_water';
         const food = c.kind === 'sandwich' || c.kind === 'sardine_can' || c.kind === 'rotten_fish';
         const matches = reason === 'water' ? water : food; // food/hurricane は食料カード
         if (!matches) return s;
@@ -641,7 +661,8 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
     case 'canteen':
     case 'fishing_rod':
     case 'axe':
-    case 'crystal_ball': {
+    case 'crystal_ball':
+    case 'club': {
       // 受動の永続：使って初めて効果が発動し、公開される（以後ずっと有効）。
       if (d.phase !== 'action') return s;
       if (p.revealed.includes(c.kind)) return s;
@@ -706,10 +727,18 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
       if (!t || !t.alive || t.escaped || t.id === playerId) return s;
       removeOneCard(p, 'bullet');
       reveal(p, 'gun');
+      // トタン板：撃たれた側が持っていれば、自動で1回だけ弾を防ぐ（板は消費）
+      if (hasCard(t, 'tin_sheet')) {
+        removeOneCard(t, 'tin_sheet');
+        pushLog(d, `${p.name} は ${t.name} を撃ったが、トタン板で防がれた！（弾を消費）`, 'card', t.id);
+        break;
+      }
       // 撃った側が被害者の手札を得る
       for (const card2 of t.hand) p.hand.push(card2);
       t.hand = [];
       t.alive = false;
+      d.roundDeaths = (d.roundDeaths ?? 0) + 1;
+      d.bodiesAvailable = (d.bodiesAvailable ?? 0) + 1;
       pushLog(d, `${p.name} は ${t.name} を銃で撃った！所持品を奪った。`, 'death', t.id);
       // 投票/生存中の射殺で人数が減る → 進行を再評価
       if (d.phase === 'vote' && d.pendingEliminations > 0) {
@@ -723,6 +752,52 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
       }
       break;
     }
+    case 'matches': {
+      // マッチ：次に消費する汚れた水/腐った魚の「病気」を1回だけ無効化する。
+      if (d.phase !== 'action' && d.phase !== 'survival' && d.phase !== 'vote') return s;
+      if (p.matchSafe) return s;
+      p.matchSafe = true;
+      removeOneCard(p, 'matches');
+      pushLog(d, `${p.name} はマッチを擦った（次の汚れた水/腐った魚を安全に飲食できる）。`, 'card', playerId);
+      break;
+    }
+    case 'telescope': {
+      // 望遠鏡：相手1人の手札を全部見る（覗いた本人にだけ届く）。
+      if (d.phase !== 'action') return s;
+      const t = targetId ? find(d, targetId) : undefined;
+      if (!t || t.id === playerId) return s;
+      d.lastPeek = { byId: playerId, targetId: t.id, targetName: t.name, hand: t.hand.map((x) => ({ ...x })) };
+      removeOneCard(p, 'telescope');
+      pushLog(d, `${p.name} は望遠鏡で ${t.name} の手札をのぞき見た。`, 'card', playerId);
+      break;
+    }
+    case 'cannibal_bbq': {
+      // 人肉BBQ：まだ食べていない死体1つにつき食料 CANNIBAL_FOOD_PER_BODY を得る。
+      if (d.phase !== 'action' && d.phase !== 'survival' && d.phase !== 'vote') return s;
+      const bodies = d.bodiesAvailable ?? 0;
+      if (bodies <= 0) return s; // 脱落者がいなければ使えない
+      const gain = bodies * CANNIBAL_FOOD_PER_BODY;
+      d.food = clampSupply(d.food + gain);
+      d.bodiesAvailable = 0;
+      removeOneCard(p, 'cannibal_bbq');
+      recordGain(d, playerId, 'food', gain);
+      pushLog(d, `${p.name} は人肉BBQで死体${bodies}体を食料に変えた（食料 +${gain}）。`, 'card', playerId);
+      break;
+    }
+    case 'conch': {
+      // ほら貝：進行中の追放(投票)を1回無効化する。誰も脱落させずに次へ。
+      if (d.phase !== 'vote') return s;
+      removeOneCard(p, 'conch');
+      pushLog(d, `${p.name} がほら貝を吹き鳴らした！この追放は無効になった。`, 'card', playerId);
+      d.pendingEliminations = Math.max(0, d.pendingEliminations - 1);
+      for (const q of d.players) {
+        q.vote = undefined;
+        q.voteSafe = false;
+        (q as { votesReceived?: number }).votesReceived = undefined;
+      }
+      if (d.pendingEliminations <= 0) return afterVoteBatch(d);
+      return startVote(d);
+    }
     default:
       return s;
   }
@@ -732,6 +807,7 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
 function cardName(kind: CardKind): string {
   const map: Partial<Record<CardKind, string>> = {
     water_bottle: '水ボトル',
+    coconut: 'ココナッツの実',
     dirty_water: '汚れた水',
     sandwich: 'サンドイッチ',
     sardine_can: 'イワシ缶',
