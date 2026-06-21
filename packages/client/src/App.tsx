@@ -165,6 +165,8 @@ export function App() {
       localRef.current = runner;
       setLocalRunner(runner);
       const res = runner.createRoom(name);
+      // オフラインは最初からCPU3人（計4人）を既定にしておく（ロビーで増減可能）
+      for (let i = 0; i < 3; i++) runner.addBot();
       const s = { roomId: res.roomId, playerId: res.playerId, name, offline: true };
       saveSession(s);
       setSession(s);

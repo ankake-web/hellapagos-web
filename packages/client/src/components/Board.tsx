@@ -437,10 +437,7 @@ function cardUsable(view: PublicGameState, me: PublicPlayer, c: Card): { ok: boo
     return phase === 'action'
       ? { ok: true }
       : { ok: false, reason: '自分の手番（行動フェイズ）で使うと発動し、以後ずっと効果が続きます。' };
-  if (cat === 'junk')
-    return phase === 'action'
-      ? { ok: true }
-      : { ok: false, reason: '効果はありませんが、行動フェイズで手放せます（はったり）。' };
+  if (cat === 'junk') return { ok: false, reason: '使えません。手札に残るので「カードを使わない＝何を持っているか怪しまれる」状況を作ります。' };
   if (k === 'bullet') return { ok: false, reason: '銃と一緒に使います（単体では使えません）。' };
   if (cat === 'resource') {
     if (phase === 'vote') return { ok: true };

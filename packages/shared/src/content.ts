@@ -145,7 +145,7 @@ export const CARD_INFO: Record<CardKind, { icon: string; name: string; desc: str
   crystal_ball: { icon: '🔮', name: '水晶玉', desc: '使うと発動・公開される永続カード', cat: 'permanent' },
   gun: { icon: '🔫', name: '銃', desc: '弾があれば他者を排除（使うと公開・脱落でも回収）', cat: 'permanent' },
   bullet: { icon: '💥', name: '弾', desc: '銃と併用・使用後失う', cat: 'permanent' },
-  junk: { icon: '🗑️', name: '無用品', desc: '効果なし。手放して「使った」ふりができる（はったり）', cat: 'junk' },
+  junk: { icon: '🗑️', name: '無用品', desc: '効果なし・使用不可。手札に残るので「何を持っているか」怪しまれる', cat: 'junk' },
 };
 
 // ===== CPU 性格・難易度のチューニング =====

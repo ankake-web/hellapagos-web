@@ -606,8 +606,8 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
   if (!card) return s;
   // 病気中はカード不可（自己救済は自動処理のため除外）
   if (p0.sick && card.kind !== 'serum') return s;
-  // 弾は単体では使えない（銃と併用）
-  if (card.kind === 'bullet') return s;
+  // 弾は単体では使えない（銃と併用）。無用品は一切使えない（手札に残り、何を持つか怪しまれる）。
+  if (card.kind === 'bullet' || card.kind === 'junk') return s;
 
   const d = clone(s);
   const p = find(d, playerId)!;
@@ -648,13 +648,6 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
       p.revealed.push(c.kind);
       removeOneCard(p, c.kind);
       pushLog(d, `${p.name} は ${permName(c.kind)} を使った（以後ずっと効果が続く）。`, 'card', playerId);
-      break;
-    }
-    case 'junk': {
-      // 無用品：効果は無いが「使った（手放した）」ことにできる＝はったり。
-      if (d.phase !== 'action') return s;
-      removeOneCard(p, 'junk');
-      pushLog(d, `${p.name} は無用品を手放した（はったり）。`, 'card', playerId);
       break;
     }
     case 'serum': {
