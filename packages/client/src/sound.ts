@@ -38,7 +38,12 @@ export function toggleMute(): boolean {
   } catch {
     /* ignore */
   }
-  if (!muted) ensureCtx(); // ミュート解除時にユーザー操作としてコンテキストを起こす
+  if (muted) {
+    // ミュート時はBGMを素早くフェードアウト
+    if (bgmMaster && ctx) bgmMaster.gain.setTargetAtTime(0.00001, ctx.currentTime, 0.2);
+  } else {
+    ensureCtx(); // ミュート解除時にユーザー操作としてコンテキストを起こす（BGMはスケジューラが再開）
+  }
   return muted;
 }
 
@@ -150,5 +155,152 @@ export function playSound(name: SoundName): void {
         tone({ freq: f, dur: 0.25, type: 'sawtooth', gain: 0.13, delay: i * 0.16 }),
       );
       break;
+  }
+}
+
+// =====================================================================
+// 手続き生成BGM（音源ファイル不要）
+// ゆったりした和音パッド＋やさしいアルペジオ＋波のうねり。嵐時は低いドローン＋速めの緊張モード。
+// 自動再生ポリシー対策：初回のユーザー操作で AudioContext を起こすまで音は鳴らない。
+// =====================================================================
+let bgmMaster: GainNode | null = null;
+let bgmEnabled = false;
+let bgmMood: 'calm' | 'tense' = 'calm';
+let bgmTimer: number | null = null;
+let bgmNextTime = 0;
+let bgmStep = 0;
+let bgmKicked = false;
+
+// A マイナー系の落ち着いた進行（低めの三和音）
+const PROG_CALM = [
+  [220.0, 261.63, 329.63], // Am
+  [174.61, 220.0, 261.63], // F
+  [196.0, 246.94, 293.66], // G
+  [261.63, 329.63, 392.0], // C
+];
+const PROG_TENSE = [
+  [220.0, 261.63, 311.13], // Am(暗め)
+  [207.65, 246.94, 311.13],
+  [196.0, 233.08, 293.66],
+  [174.61, 207.65, 277.18],
+];
+
+function bgmGain(): GainNode | null {
+  if (!ctx) return null;
+  if (!bgmMaster) {
+    bgmMaster = ctx.createGain();
+    bgmMaster.gain.value = 0.00001;
+    bgmMaster.connect(ctx.destination);
+  }
+  return bgmMaster;
+}
+
+function bgmPad(freq: number, t0: number, dur: number, g: number): void {
+  const ac = ctx;
+  const out = bgmMaster;
+  if (!ac || !out) return;
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(g, t0 + 0.9);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(gain).connect(out);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.05);
+}
+
+function bgmPluck(freq: number, t0: number, g: number): void {
+  const ac = ctx;
+  const out = bgmMaster;
+  if (!ac || !out) return;
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(g, t0 + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.36);
+  osc.connect(gain).connect(out);
+  osc.start(t0);
+  osc.stop(t0 + 0.4);
+}
+
+function bgmSwell(t0: number, g: number): void {
+  const ac = ctx;
+  const out = bgmMaster;
+  if (!ac || !out) return;
+  const dur = 2.4;
+  const frames = Math.floor(ac.sampleRate * dur);
+  const buf = ac.createBuffer(1, frames, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) d[i] = (Math.random() * 2 - 1) * 0.5;
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 480;
+  const gain = ac.createGain();
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.linearRampToValueAtTime(g, t0 + dur * 0.45);
+  gain.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(lp).connect(gain).connect(out);
+  src.start(t0);
+  src.stop(t0 + dur);
+}
+
+function scheduleBgm(): void {
+  if (!bgmEnabled || muted) return;
+  const ac = ctx; // ここでは生成しない（ジェスチャ前に suspended を作らない）
+  if (!ac || ac.state !== 'running') return;
+  const out = bgmGain();
+  if (!out) return;
+  // 目標音量へなめらかにフェードイン
+  out.gain.setTargetAtTime(0.85, ac.currentTime, 1.6);
+
+  const spb = bgmMood === 'tense' ? 0.34 : 0.46; // 1拍の長さ
+  const prog = bgmMood === 'tense' ? PROG_TENSE : PROG_CALM;
+  if (bgmNextTime < ac.currentTime) bgmNextTime = ac.currentTime + 0.08;
+  while (bgmNextTime < ac.currentTime + 0.5) {
+    const beat = bgmStep % 8;
+    const chord = prog[Math.floor(bgmStep / 8) % prog.length];
+    if (beat === 0) {
+      chord.forEach((f) => bgmPad(f, bgmNextTime, spb * 8 * 1.05, 0.028));
+      if (bgmMood === 'tense') bgmPad(chord[0] / 2, bgmNextTime, spb * 8, 0.03); // 低いドローン
+    }
+    const up = beat >= 4 ? 2 : 1;
+    const note = chord[beat % chord.length] * up;
+    if (beat % 2 === 0 || bgmMood === 'tense') bgmPluck(note, bgmNextTime, 0.02);
+    if (bgmStep % 16 === 0) bgmSwell(bgmNextTime, bgmMood === 'tense' ? 0.03 : 0.016);
+    bgmNextTime += spb;
+    bgmStep++;
+  }
+}
+
+/** BGMを有効化（実際の発音は初回ユーザー操作で AudioContext が起きてから）。 */
+export function startBgm(mood: 'calm' | 'tense' = 'calm'): void {
+  bgmEnabled = true;
+  bgmMood = mood;
+  if (bgmTimer == null) bgmTimer = window.setInterval(scheduleBgm, 120);
+  // 初回のタップ/クリックで AudioContext を起こす（自動再生ポリシー対応）
+  if (!bgmKicked && typeof document !== 'undefined') {
+    bgmKicked = true;
+    const kick = () => ensureCtx();
+    document.addEventListener('pointerdown', kick, { once: true });
+    document.addEventListener('keydown', kick, { once: true });
+  }
+}
+
+export function setBgmMood(mood: 'calm' | 'tense'): void {
+  bgmMood = mood;
+}
+
+export function stopBgm(): void {
+  bgmEnabled = false;
+  if (bgmMaster && ctx) bgmMaster.gain.setTargetAtTime(0.00001, ctx.currentTime, 0.4);
+  if (bgmTimer != null) {
+    window.clearInterval(bgmTimer);
+    bgmTimer = null;
   }
 }

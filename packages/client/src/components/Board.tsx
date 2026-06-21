@@ -544,13 +544,13 @@ function RoundSplash({ view }: { view: PublicGameState }) {
     return () => window.clearTimeout(id);
   }, [view.round, view.phase]);
   if (!show) return null;
-  const icon = view.hurricaneRevealed ? '🌀' : view.currentPrecip === 0 ? '☀️' : view.currentPrecip >= 3 ? '⛈️' : '🌧️';
+  const wxName = view.hurricaneRevealed ? 'wx-hurricane' : view.currentPrecip === 0 ? 'wx-sun' : view.currentPrecip >= 3 ? 'wx-storm' : 'wx-rain';
   const wClass = view.hurricaneRevealed ? 'storm' : view.currentPrecip === 0 ? 'sun' : 'rain';
   return (
     <div className="weather-reveal" aria-hidden>
       <div className={`wr-card ${wClass}`}>
         <span className="wr-round">{view.round}ラウンド目</span>
-        <span className="wr-icon">{icon}</span>
+        <GameIcon name={wxName} size={88} className="wr-icon" />
         <span className="wr-weather">{weatherLabel(view)}</span>
         {view.hurricaneRevealed && <span className="wr-storm">本ラウンドで強制脱出！</span>}
       </div>

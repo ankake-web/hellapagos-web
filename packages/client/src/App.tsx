@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage, PublicGameState } from '@hellapagos/shared';
 import { api, clearSession, loadSession, saveSession, type Session } from './api.js';
 import { socket } from './socket.js';
-import { isMuted, playSound, toggleMute } from './sound.js';
+import { isMuted, playSound, toggleMute, startBgm, stopBgm, setBgmMood } from './sound.js';
 import { loadStats, recordResult, type Stats } from './stats.js';
 import { Backdrop } from './components/Backdrop.js';
 import { Home } from './components/Home.js';
@@ -112,6 +112,16 @@ export function App() {
     chatLen.current = chat.length;
   }, [chat.length]);
 
+  // BGM：手続き生成のアンビエント。起動は初回タップ後（自動再生ポリシー対応）。
+  useEffect(() => {
+    startBgm();
+    return () => stopBgm();
+  }, []);
+  // 嵐のラウンドは緊張モードへ切り替え
+  useEffect(() => {
+    setBgmMood(view?.hurricaneRevealed ? 'tense' : 'calm');
+  }, [view?.hurricaneRevealed]);
+
   // 接続バナーは「一定時間つながらなかった場合だけ」表示（初回ロードの一瞬の点滅を防ぐ）
   useEffect(() => {
     if (connected) {
@@ -184,7 +194,7 @@ export function App() {
       <Backdrop />
       <button
         className="mute-btn"
-        title={muted ? 'ミュート中' : '効果音オン'}
+        title={muted ? 'ミュート中（タップで音オン）' : 'BGM・効果音オン（タップでミュート）'}
         onClick={() => setMuted(toggleMute())}
       >
         {muted ? '🔇' : '🔊'}
