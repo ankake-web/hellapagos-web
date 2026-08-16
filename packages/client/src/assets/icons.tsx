@@ -49,6 +49,23 @@ const ICON_SVG: Record<string, string> = {
   matches: `<rect x="21.5" y="15" width="5" height="25" rx="1.6" fill="#ecdcae" stroke="#16242c" stroke-width="1.5"/><ellipse cx="24" cy="14" rx="4" ry="5" fill="#ff6f6f" stroke="#16242c" stroke-width="1.3"/><path d="M24 3c3.5 4 4.5 7.5 0 11-4.5-3.5-3.5-7 0-11z" fill="#ffd479" stroke="#16242c" stroke-width="1.2" stroke-linejoin="round"/><path d="M24 6c1.6 2.2 2 4.5 0 6.6-2-2.1-1.6-4.4 0-6.6z" fill="#ff9f43"/>`,
   telescope: `<g stroke="#16242c" stroke-width="1.5" stroke-linejoin="round"><rect x="6" y="27" width="14" height="9" rx="2.5" transform="rotate(-32 13 31.5)" fill="#e8a13a"/><rect x="17" y="21" width="13" height="8" rx="2.5" transform="rotate(-32 23.5 25)" fill="#ffd479"/><rect x="28" y="14" width="12" height="7" rx="2.5" transform="rotate(-32 34 17.5)" fill="#e8a13a"/></g><circle cx="11" cy="35" r="1.4" fill="#5e3a20"/>`,
   cannibal_bbq: `<ellipse cx="24" cy="25" rx="15" ry="6" fill="#5e3a20" stroke="#16242c" stroke-width="1.5"/><ellipse cx="24" cy="21" rx="15" ry="5" fill="#8a9a9c" stroke="#16242c" stroke-width="1.5"/><path d="M11 21h26M15 18l18 6M15 24l18-6" stroke="#5e3a20" stroke-width="1.1" opacity="0.7"/><line x1="12" y1="27" x2="9" y2="40" stroke="#16242c" stroke-width="2" stroke-linecap="round"/><line x1="36" y1="27" x2="39" y2="40" stroke="#16242c" stroke-width="2" stroke-linecap="round"/><line x1="24" y1="29" x2="24" y2="40" stroke="#16242c" stroke-width="2" stroke-linecap="round"/><path d="M19 17c1.5-4 3.5-2.5 3-6 2 3.5 4 2 3 6z" fill="#ff9f43"/><path d="M27 18c1-3 2.5-2 2-4.5 1.5 2.5 2.5 1.5 2 4.5z" fill="#ffd479"/>`,
+
+  // ===== 事件演出用（絵文字の置き換え） =====
+  skull: `<path d="M24 5c-9.5 0-16 6.5-16 15 0 5.2 2.2 8.6 4.4 10.6.9.8 1.4 2 1.4 3.2V37a4 4 0 0 0 4 4h12.4a4 4 0 0 0 4-4v-3.2c0-1.2.5-2.4 1.4-3.2C37.8 28.6 40 25.2 40 20.2 40 11.5 33.5 5 24 5Z" fill="#ecdcae" stroke="#16242c" stroke-width="1.6" stroke-linejoin="round"/><ellipse cx="17.6" cy="21" rx="4.6" ry="5.2" fill="#16242c"/><ellipse cx="30.4" cy="21" rx="4.6" ry="5.2" fill="#16242c"/><path d="M24 27.5 21.2 32.5h5.6L24 27.5Z" fill="#16242c"/><path d="M19 41v-4.6M24 41v-4.6M29 41v-4.6" stroke="#16242c" stroke-width="1.6" stroke-linecap="round"/>`,
+  card: `<rect x="7" y="11" width="21" height="29" rx="3.5" transform="rotate(-9 17.5 25.5)" fill="#d8bd81" stroke="#16242c" stroke-width="1.5"/><rect x="19" y="8" width="22" height="32" rx="3.5" fill="#f4f8f7" stroke="#16242c" stroke-width="1.5"/><rect x="22.5" y="11.5" width="15" height="25" rx="2" fill="#1d5a6e"/><path d="M30 17.5 34 24l-4 6.5L26 24l4-6.5Z" fill="#ffd479"/>`,
+  alert: `<path d="M24 6 4.5 40h39L24 6Z" fill="#ffd479" stroke="#16242c" stroke-width="1.6" stroke-linejoin="round"/><line x1="24" y1="18" x2="24" y2="29" stroke="#16242c" stroke-width="3.2" stroke-linecap="round"/><circle cx="24" cy="34.6" r="2.1" fill="#16242c"/>`,
+};
+
+// UI用の線画アイコン（24×24・stroke-width 2・currentColor）。
+// 盤面グリフ(ICON_SVG)と違い、ボタンや見出しに置く記号はここへ1箇所にまとめる。
+const UI_SVG: Record<string, string> = {
+  menu: `<line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/>`,
+  book: `<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5Z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5Z"/>`,
+  trophy: `<path d="M7 3.5h10V9a5 5 0 0 1-10 0Z"/><path d="M7 5H4v1.6A4 4 0 0 0 7 10.5M17 5h3v1.6a4 4 0 0 1-3 3.9"/><line x1="12" y1="14" x2="12" y2="17.5"/><path d="M9.5 17.5h5v3h-5Z"/><line x1="7.5" y1="20.5" x2="16.5" y2="20.5"/>`,
+  home: `<path d="M3.5 11 12 3.5l8.5 7.5"/><path d="M6 9.8V20.5h12V9.8"/><path d="M9.8 20.5V14h4.4v6.5"/>`,
+  'sound-on': `<path d="M4 9.5h3.6L12.5 5v14L7.6 14.5H4Z"/><path d="M16.2 8.8a4.6 4.6 0 0 1 0 6.4"/><path d="M19 6a8.6 8.6 0 0 1 0 12"/>`,
+  'sound-off': `<path d="M4 9.5h3.6L12.5 5v14L7.6 14.5H4Z"/><line x1="16.5" y1="9.5" x2="22" y2="15"/><line x1="22" y1="9.5" x2="16.5" y2="15"/>`,
+  eye: `<path d="M2.5 12S6 6.2 12 6.2 21.5 12 21.5 12 18 17.8 12 17.8 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/>`,
 };
 
 const HERO_SVG = `<defs><linearGradient id="heroSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#11314a"/><stop offset="0.55" stop-color="#1c5167"/><stop offset="1" stop-color="#e89b5a"/></linearGradient><radialGradient id="heroSun" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffd479"/><stop offset="0.6" stop-color="#ff9f43"/><stop offset="1" stop-color="#ff9f43" stop-opacity="0"/></radialGradient></defs><rect x="0" y="0" width="320" height="180" fill="url(#heroSky)"/><circle cx="258" cy="96" r="42" fill="url(#heroSun)"/><circle cx="258" cy="96" r="16" fill="#ffd479" opacity="0.9"/><circle cx="40" cy="30" r="1.1" fill="#f4f8f7" opacity="0.8"/><circle cx="96" cy="22" r="0.9" fill="#f4f8f7" opacity="0.7"/><circle cx="150" cy="16" r="0.8" fill="#f4f8f7" opacity="0.6"/><polygon points="68,42 69,45 72,46 69,47 68,50 67,47 64,46 67,45" fill="#f4f8f7" opacity="0.55"/><g opacity="0.95"><ellipse cx="42" cy="58" rx="40" ry="18" fill="#1a2730"/><ellipse cx="78" cy="54" rx="34" ry="15" fill="#2a3b47"/><ellipse cx="30" cy="70" rx="30" ry="13" fill="#2a3b47"/><ellipse cx="60" cy="72" rx="30" ry="12" fill="#1a2730"/></g><line x1="46" y1="70" x2="40" y2="82" stroke="#cfeaff" stroke-width="1.4" opacity="0.75"/><line x1="40" y1="82" x2="45" y2="82" stroke="#cfeaff" stroke-width="1.4" opacity="0.75"/><line x1="45" y1="82" x2="38" y2="94" stroke="#cfeaff" stroke-width="1.4" opacity="0.6"/><path d="M82,40 q-3,-2 -6,1" fill="none" stroke="#16242c" stroke-width="1" opacity="0.7"/><path d="M82,40 q3,-2 6,1" fill="none" stroke="#16242c" stroke-width="1" opacity="0.7"/><path d="M104,52 q-2.5,-1.6 -5,0.8" fill="none" stroke="#16242c" stroke-width="0.9" opacity="0.6"/><path d="M104,52 q2.5,-1.6 5,0.8" fill="none" stroke="#16242c" stroke-width="0.9" opacity="0.6"/><rect x="0" y="112" width="320" height="68" fill="#1d5a6e"/><path d="M0,124 q40,-7 80,0 t80,0 t80,0 t80,0 v60 H0 Z" fill="#14444f"/><path d="M0,140 q50,-8 100,0 t100,0 t100,0 v40 H0 Z" fill="#0e3a47"/><path d="M0,158 q60,-6 120,0 t120,0 t120,0 v22 H0 Z" fill="#0a2c37"/><ellipse cx="126" cy="134" rx="66" ry="20" fill="#d8bd81"/><ellipse cx="122" cy="129" rx="54" ry="15" fill="#ecdcae"/><path d="M118,128 q5,-30 -2,-52" fill="none" stroke="#5e3a20" stroke-width="4" stroke-linecap="round"/><path d="M116,77 q-22,-10 -34,-4 q16,-2 32,6" fill="#3f8a5a"/><path d="M116,77 q-20,-16 -30,-18 q14,4 30,12" fill="#5fb27a"/><path d="M116,77 q22,-12 36,-8 q-18,0 -32,8" fill="#5fb27a"/><path d="M116,77 q18,-18 28,-20 q-12,6 -26,16" fill="#3f8a5a"/><path d="M116,77 q6,-20 4,-30 q-2,16 -4,30" fill="#5fb27a"/><g transform="rotate(-4 150 138)"><rect x="132" y="132" width="54" height="5" rx="2" fill="#8a5a34"/><rect x="132" y="138" width="54" height="5" rx="2" fill="#5e3a20"/><rect x="132" y="144" width="50" height="5" rx="2" fill="#8a5a34"/><rect x="134" y="126" width="5" height="24" rx="2" fill="#5e3a20"/><rect x="178" y="126" width="5" height="24" rx="2" fill="#5e3a20"/><line x1="148" y1="128" x2="152" y2="148" stroke="#16242c" stroke-width="1" opacity="0.5"/><line x1="166" y1="128" x2="170" y2="148" stroke="#16242c" stroke-width="1" opacity="0.5"/></g>`;
@@ -82,6 +99,40 @@ export function GameIcon({
 
 export function hasIcon(name: string): boolean {
   return !!CARD_ART[name] || !!ICON_SVG[name];
+}
+
+/** ボタン・見出し用の線画アイコン。文字色（currentColor）に追従するので、どの面でも馴染む。 */
+export function UiIcon({
+  name,
+  size = 20,
+  className,
+  title,
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+  title?: string;
+}) {
+  const inner = UI_SVG[name];
+  if (!inner) return null;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role={title ? 'img' : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      style={{ display: 'block', flexShrink: 0 }}
+      dangerouslySetInnerHTML={{ __html: inner }}
+    />
+  );
 }
 
 /** ホーム画面のヒーロー挿絵。bg/hero.* の実画像があればそれを、無ければSVGを描く。 */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { LeaderboardEntry } from '@hellapagos/shared';
 import { fetchLeaderboard } from '../api.js';
+import { UiIcon } from '../assets/icons.js';
 
 interface Props {
   onClose: () => void;
@@ -24,7 +25,7 @@ export function Leaderboard({ onClose }: Props) {
     <div className="overlay" onClick={onClose}>
       <div className="modal ranking" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>🏆 ランキング</h2>
+          <h2 className="with-ic"><UiIcon name="trophy" size={22} />ランキング</h2>
           <button className="btn ghost small" onClick={onClose}>
             閉じる
           </button>

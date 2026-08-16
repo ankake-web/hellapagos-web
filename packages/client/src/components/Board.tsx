@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPlayer } from '@hellapagos/shared';
 import { CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
-import { GameIcon } from '../assets/icons.js';
+import { GameIcon, UiIcon } from '../assets/icons.js';
 import { ART } from '../assets/manifest.js';
 import { playSound } from '../sound.js';
+import { ConfirmModal, type ConfirmLine } from './Confirm.js';
 
 interface Props {
   view: PublicGameState;
@@ -32,9 +33,15 @@ const KIND_CLASS: Record<string, string> = {
   info: 'info',
 };
 
-/** 表示用に「座席」を「船」へ言い換える（サーバ未再デプロイでも名称統一を保つ）。 */
+/** 表示用の整形（サーバ未再デプロイでも表示だけ揃える）。
+ *  ・「座席」→「船」に言い換え
+ *  ・サーバ側ログに混じる絵文字を除去（アイコンはSVGで別に描いているので二重表示になるため） */
 function shipText(s: string): string {
-  return s.replace(/座席/g, '船');
+  return s
+    .replace(/座席/g, '船')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function weatherLabel(v: PublicGameState): string {
@@ -47,11 +54,13 @@ function weatherLabel(v: PublicGameState): string {
 export function Board({ view, chat, onSay, onLeave }: Props) {
   const me = view.players.find((p) => p.isYou);
   const [targeting, setTargeting] = useState<{ card: Card; mode: 'gun' | 'voodoo' | 'telescope' } | null>(null);
+  // 対象を選んだ直後の確認シート（射撃は特に取り返しがつかないので必ず1枚挟む）
+  const [targetConfirm, setTargetConfirm] = useState<PublicPlayer | null>(null);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [tab, setTab] = useState<'log' | 'chat'>('log');
   const freshDraw = useFreshDraw(view);
 
-  useEffect(() => setTargeting(null), [view.phase, view.round, view.currentActorId]);
+  useEffect(() => { setTargeting(null); setTargetConfirm(null); }, [view.phase, view.round, view.currentActorId]);
 
   const targetable = (p: PublicPlayer): boolean => {
     if (!targeting) return false;
@@ -61,7 +70,13 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
   const pickTarget = (p: PublicPlayer) => {
     if (!targeting || !targetable(p)) return;
     playSound('click');
-    api.playCard(targeting.card.id, p.id);
+    setTargetConfirm(p);
+  };
+  const commitTarget = () => {
+    if (!targeting || !targetConfirm) return;
+    playSound('click');
+    api.playCard(targeting.card.id, targetConfirm.id);
+    setTargetConfirm(null);
     setTargeting(null);
   };
 
@@ -110,6 +125,14 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
         />
       )}
       <PeekModal peek={view.peek} />
+      {targeting && targetConfirm && (
+        <TargetConfirm
+          mode={targeting.mode}
+          target={targetConfirm}
+          onCancel={() => setTargetConfirm(null)}
+          onConfirm={commitTarget}
+        />
+      )}
       {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} />}
     </div>
   );
@@ -131,7 +154,71 @@ function useFreshDraw(view: PublicGameState): PublicGameState['lastDraw'] | null
   return fresh;
 }
 
-/** 袋の玉。魚は数字、ヘビは🐍（木集めのみ）、釣りのハズレは灰色✗。緊張感のため1個ずつ遅延表示。 */
+/** 対象を選ぶカード（拳銃・ブードゥー人形・望遠鏡）の確認シート。
+ *  特に射撃は相手が即死するので、誰を撃つのか・何を消費するのかを明示する。 */
+function TargetConfirm({
+  mode,
+  target,
+  onCancel,
+  onConfirm,
+}: {
+  mode: 'gun' | 'voodoo' | 'telescope';
+  target: PublicPlayer;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (mode === 'gun') {
+    return (
+      <ConfirmModal
+        danger
+        title={`${target.name} を撃ちますか？`}
+        lead="撃たれた人はその場で死亡します。撃った事実は全員に伝わり、取り消せません。"
+        lines={[
+          { label: `${target.name} の運命`, value: '即死（トタン板を持っていれば1回だけ防がれる）', tone: 'danger' },
+          { label: '奪える持ち物', value: `手札 ${target.handCount} 枚`, tone: 'good' },
+          { label: 'あなたが失うもの', value: '弾 1発（拳銃は手元に残る）', tone: 'danger' },
+        ]}
+        confirmLabel="撃つ"
+        cancelLabel="やめる"
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  if (mode === 'voodoo') {
+    return (
+      <ConfirmModal
+        title={`${target.name} を蘇生しますか？`}
+        lead="脱落した人が生き返り、以降の水・食料の消費と投票に加わります。"
+        lines={[
+          { label: '蘇る人', value: target.name, tone: 'good' },
+          { label: '生存者', value: '1人増える（必要な水・食料も1人分増える）' },
+          { label: 'あなたが失うもの', value: 'ブードゥー人形 1枚（使い切り）', tone: 'danger' },
+        ]}
+        confirmLabel="蘇生する"
+        cancelLabel="やめる"
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  return (
+    <ConfirmModal
+      title={`${target.name} の手札をのぞきますか？`}
+      lead="のぞいた内容はあなたにだけ見えます。カードは戻ってきません。"
+      lines={[
+        { label: '見える枚数', value: `${target.handCount} 枚`, tone: 'good' },
+        { label: 'あなたが失うもの', value: '望遠鏡 1枚（使い切り）', tone: 'danger' },
+      ]}
+      confirmLabel="のぞく"
+      cancelLabel="やめる"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
+/** 袋の玉。魚は数字、ヘビはヘビのアイコン（木集めのみ）、釣りのハズレは灰色✗。緊張感のため1個ずつ遅延表示。 */
 function Balls({ balls, action, small }: { balls: Array<{ fish: number } | { snake: true }>; action: ActionType; small?: boolean }) {
   // ヘビは最後に出す（最後にドキッ）
   const ordered = [...balls].sort((a, b) => Number('snake' in a) - Number('snake' in b));
@@ -140,7 +227,11 @@ function Balls({ balls, action, small }: { balls: Array<{ fish: number } | { sna
       {ordered.map((b, i) => {
         const snake = 'snake' in b;
         const cls = snake ? (action === 'wood' ? 'snake' : 'miss') : '';
-        const label = snake ? (action === 'wood' ? '🐍' : '✗') : (b as { fish: number }).fish;
+        const label = snake
+          ? action === 'wood'
+            ? <GameIcon name="snake" size={small ? 16 : 30} />
+            : '✗'
+          : (b as { fish: number }).fish;
         return (
           <span key={i} className={`ball ${cls}`} style={{ animationDelay: `${i * (small ? 0.12 : 0.32)}s` }}>
             {label}
@@ -193,12 +284,16 @@ function WoodSplash({ view, draw }: { view: PublicGameState; draw: PublicGameSta
   );
 }
 
+/** 対戦中のヘッダー。375px幅で3〜4段に折り返して盤面を圧迫していたので、
+ *  1段目に「ラウンド」と「フェイズ＋残り時間」、2段目に「天気」と「天候カードの残り」を置いて2段以内に収める。 */
 function Header({ view }: { view: PublicGameState }) {
   const left = useCountdown(view.deadlineAt);
   return (
     <header className="header">
       <div className="header-left">
         <span className="day">{view.round}ラウンド</span>
+      </div>
+      <div className="header-sub">
         <span className="weather">{weatherLabel(view)}</span>
         <span className={`storm ${view.hurricaneRevealed ? 'urgent' : ''}`}>
           {view.hurricaneRevealed ? '本ラウンドで強制脱出' : `天候カード残り ${view.weatherRemaining}`}
@@ -229,12 +324,45 @@ function Tracks({ view }: { view: PublicGameState }) {
         flyKey="raft"
         raft
         big
-        sub={`木 ${view.raftProgress}/${RAFT_LOOP} で次の席`}
+        progress={view.raftProgress}
+        sub={`次の席まで あと木 ${RAFT_LOOP - view.raftProgress} 本`}
         title={`船 ${view.raftSeats} / ${need}（木${RAFT_LOOP}で+1）`}
       />
     </div>
   );
 }
+
+/** 量を「丸の数」で見せるメーター。数字だけだと読み飛ばされるので必ず数字と併記する。
+ *  必要数ぶんの枠は必ず描き、足りない分は空の丸にして「あと何個か」を一目で分かるようにする。 */
+function Pips({ value, need }: { value: number; need: number }) {
+  const MAX = 12; // 丸が増えすぎるとかえって読めないので打ち切って「+n」で示す
+  const slots = Math.min(MAX, Math.max(need, Math.min(value, MAX)));
+  const over = Math.max(0, value - slots);
+  const short = value < need;
+  return (
+    <div className="pips" aria-hidden>
+      {Array.from({ length: slots }, (_, i) => (
+        <span key={i} className={`pip ${i < value ? (short ? 'short' : 'ok') : 'empty'}`} />
+      ))}
+      {over > 0 && <span className="pip-more">+{over}</span>}
+    </div>
+  );
+}
+
+/** 船の進み具合。完成した席は丸、次の1席までの木の進みは板（RAFT_LOOP枚）で見せる。 */
+function RaftMeter({ seats, need, progress }: { seats: number; need: number; progress: number }) {
+  return (
+    <>
+      <Pips value={seats} need={need} />
+      <div className="raft-bar" aria-hidden>
+        {Array.from({ length: RAFT_LOOP }, (_, i) => (
+          <span key={i} className={`plank ${i < progress ? 'on' : ''}`} />
+        ))}
+      </div>
+    </>
+  );
+}
+
 function ResCell({
   icon,
   value,
@@ -244,6 +372,7 @@ function ResCell({
   big,
   sub,
   title,
+  progress,
 }: {
   icon: string;
   value: number;
@@ -253,6 +382,8 @@ function ResCell({
   big?: boolean;
   sub?: string;
   title?: string;
+  /** 船だけ：次の席までの木の進み（0..RAFT_LOOP-1）。 */
+  progress?: number;
 }) {
   const short = value < need;
   return (
@@ -263,6 +394,7 @@ function ResCell({
           <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}</strong>
           <small>/{need}</small>
         </div>
+        {raft ? <RaftMeter seats={value} need={need} progress={progress ?? 0} /> : <Pips value={value} need={need} />}
         {sub && <span className="rcell-sub">{sub}</span>}
       </div>
     </div>
@@ -327,21 +459,75 @@ function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) 
   }
 }
 
+/** 行動の確認シートに出す「何が起きるか」の明細。 */
+function actionConfirm(view: PublicGameState, action: ActionType, wood: number): { title: string; lines: ConfirmLine[]; danger?: boolean } {
+  switch (action) {
+    case 'fish':
+      return {
+        title: '釣りをしますか？',
+        lines: [
+          { label: '引く玉', value: '1個（魚1〜3 か 不漁）' },
+          { label: '見込みの食料', value: '+1〜3（釣り竿を発動済みなら倍）', tone: 'good' },
+          { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
+        ],
+      };
+    case 'water':
+      return {
+        title: '水を汲みますか？',
+        lines: [
+          { label: '得られる水', value: `+${view.currentPrecip}（水筒を発動済みなら倍）`, tone: 'good' },
+          { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
+        ],
+      };
+    case 'search':
+      return {
+        title: '難破船を漁りますか？',
+        lines: [
+          { label: '引くカード', value: '1枚（中身は運まかせ）', tone: 'good' },
+          { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
+        ],
+      };
+    default:
+      return {
+        title: wood > 0 ? `木を集めますか？（さらに${wood}本引く）` : '木を集めますか？',
+        danger: wood > 0,
+        lines: [
+          { label: '確定でもらえる木', value: '1本（斧を発動済みなら2本）', tone: 'good' },
+          { label: 'さらに引く', value: wood > 0 ? `${wood}本ぶん袋を引く` : 'なし（安全）' },
+          ...(wood > 0
+            ? ([{ label: 'ヘビが出たら', value: '次ラウンド休み＋その回の木は全部失う', tone: 'danger' }] as ConfirmLine[])
+            : []),
+          { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
+        ],
+      };
+  }
+}
+
 function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   const [wood, setWood] = useState(0);
+  // 行動はワンタップで確定してしまうので、確認シートを1枚挟む
+  const [confirm, setConfirm] = useState<{ action: ActionType; wood: number } | null>(null);
   if (me.resting) return <div className="panel">ヘビの毒で今ラウンドは動けません。</div>;
   if (!view.isYourTurn) {
     const actor = view.players.find((p) => p.id === view.currentActorId);
     return <div className="panel"><h3>行動フェイズ</h3><p className="hint">{actor ? `${actor.name} の手番です…` : '進行中…'}</p></div>;
   }
+  const commit = () => {
+    if (!confirm) return;
+    playSound(confirm.action);
+    api.choose(confirm.action, confirm.action === 'wood' ? confirm.wood : undefined);
+    setConfirm(null);
+  };
+  const ask = (action: ActionType, n = 0) => { playSound('click'); setConfirm({ action, wood: n }); };
+  const meta = confirm ? actionConfirm(view, confirm.action, confirm.wood) : null;
   return (
     <div className="panel yourturn">
       <h3>あなたの番です — 行動を選ぶ</h3>
       <div className="action-grid">
         <div className="action-row3">
-          <button className="btn action" onClick={() => { playSound('fish'); api.choose('fish'); }}><GameIcon name={ACTION_ICON.fish} size={34} /><span className="act-name">{ACTION_LABEL.fish}</span><span className="sub">袋から1玉・魚1〜3</span></button>
-          <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => { playSound('water'); api.choose('water'); }}><GameIcon name={ACTION_ICON.water} size={34} /><span className="act-name">{ACTION_LABEL.water}</span><span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
-          <button className="btn action" onClick={() => { playSound('search'); api.choose('search'); }}><GameIcon name={ACTION_ICON.search} size={34} /><span className="act-name">{ACTION_LABEL.search}</span><span className="sub">カードを1枚引く</span></button>
+          <button className="btn action" onClick={() => ask('fish')}><GameIcon name={ACTION_ICON.fish} size={34} /><span className="act-name">{ACTION_LABEL.fish}</span><span className="sub">袋から1玉・魚1〜3</span></button>
+          <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => ask('water')}><GameIcon name={ACTION_ICON.water} size={34} /><span className="act-name">{ACTION_LABEL.water}</span><span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
+          <button className="btn action" onClick={() => ask('search')}><GameIcon name={ACTION_ICON.search} size={34} /><span className="act-name">{ACTION_LABEL.search}</span><span className="sub">カードを1枚引く</span></button>
         </div>
         <div className="btn action wood-action">
           <div className="wood-head">
@@ -350,11 +536,32 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
           </div>
           <div className="wood-push">
             <label>さらに引く本数：{wood} 本（0〜5）<input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
-            <button className="btn primary" onClick={() => { playSound('wood'); api.choose('wood', wood); }}>{wood > 0 ? `確定：1本＋${wood}本引く` : '確定：木1本だけ取る'}</button>
+            {/* 危険度メーター：数字だけだと「5本」の重さが伝わらないので玉の数で見せる */}
+            <div className="risk-meter" aria-hidden>
+              {Array.from({ length: 5 }, (_, i) => (
+                <span key={i} className={`risk-pip ${i < wood ? 'on' : ''}`} />
+              ))}
+              <span className={`risk-label ${wood >= 4 ? 'hot' : wood >= 2 ? 'warm' : ''}`}>
+                {wood === 0 ? '安全' : wood <= 2 ? 'ヘビの危険：小' : wood <= 4 ? 'ヘビの危険：中' : 'ヘビの危険：大'}
+              </span>
+            </div>
+            <button className="btn primary" onClick={() => ask('wood', wood)}>{wood > 0 ? `1本＋${wood}本引く` : '木1本だけ取る'}</button>
           </div>
         </div>
       </div>
       <p className="hint">ヘビ（黒玉）に噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると病気で次ラウンド休み＆追加分は無し。釣りの黒玉は「不漁」で病気にはなりません。</p>
+      {confirm && meta && (
+        <ConfirmModal
+          title={meta.title}
+          danger={meta.danger}
+          lead="行動は1ラウンドに1つだけ。決めると取り消せません。"
+          lines={meta.lines}
+          confirmLabel="この行動で確定"
+          cancelLabel="選び直す"
+          onCancel={() => setConfirm(null)}
+          onConfirm={commit}
+        />
+      )}
     </div>
   );
 }
@@ -376,33 +583,93 @@ function SurvivalPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }
 }
 
 function VotePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
+  // 人を追放する＝取り返しがつかない操作なので、誰に入れるのかを確認シートで必ず見せる
+  const [confirm, setConfirm] = useState<{ target: PublicPlayer | null } | null>(null);
   const reason = view.voteReason === 'water' ? '水不足' : view.voteReason === 'food' ? '食料不足' : 'ハリケーン';
   if (me.sick) return <div className="panel danger"><h3>追放投票（{reason}）</h3><p className="hint">あなたは病気のため投票できません（対象にはなります）。</p></div>;
   if (me.vote !== undefined) return <div className="panel danger"><h3>追放投票（{reason}）</h3><p className="hint">投票しました。集計を待っています…</p></div>;
   const targets = view.players.filter((p) => p.alive && !p.escaped && p.id !== me.id);
+  const commit = () => {
+    if (!confirm) return;
+    playSound('vote');
+    api.vote(confirm.target ? confirm.target.id : null);
+    setConfirm(null);
+  };
+  const t = confirm?.target ?? null;
   return (
     <div className="panel danger">
       <h3>追放投票（{reason}）— 残り{view.pendingEliminations}人</h3>
       <p className="hint">誰を犠牲にする？（手札の資源カードで自分は自動的に救われます）</p>
       <div className="vote-grid">
         {targets.map((p) => (
-          <button key={p.id} className="btn vote" onClick={() => { playSound('click'); api.vote(p.id); }}>{p.name}<span className="sub">手札{p.handCount}{p.sick ? '・病気' : ''}</span></button>
+          <button key={p.id} className="btn vote" onClick={() => { playSound('click'); setConfirm({ target: p }); }}>{p.name}<span className="sub">手札{p.handCount}{p.sick ? '・病気' : ''}{p.votesReceived ? `・${p.votesReceived}票` : ''}</span></button>
         ))}
-        <button className="btn ghost" onClick={() => { playSound('click'); api.vote(null); }}>棄権</button>
+        <button className="btn ghost" onClick={() => { playSound('click'); setConfirm({ target: null }); }}>棄権</button>
       </div>
+      {confirm && (
+        <ConfirmModal
+          danger
+          title={t ? `${t.name} に投票しますか？` : '棄権しますか？'}
+          lead={
+            t
+              ? '最多票の人はその場で追放＝死亡します。投票したあとは変更できません。'
+              : '誰にも票を入れません。投票したあとは変更できません。'
+          }
+          lines={
+            t
+              ? [
+                  { label: '追放される人', value: `${t.name}（あなたの票が入ります）`, tone: 'danger' },
+                  { label: '相手の手札', value: `${t.handCount} 枚${t.sick ? '・病気' : ''}` },
+                  { label: '相手の現在の票', value: `${t.votesReceived ?? 0} 票` },
+                  { label: '今回の犠牲者', value: `あと ${view.pendingEliminations} 人`, tone: 'danger' },
+                ]
+              : [
+                  { label: 'あなたの票', value: '誰にも入りません' },
+                  { label: '今回の犠牲者', value: `あと ${view.pendingEliminations} 人（他の人の票で決まります）`, tone: 'danger' },
+                ]
+          }
+          confirmLabel={t ? `${t.name} に投票する` : '棄権する'}
+          cancelLabel="選び直す"
+          onCancel={() => setConfirm(null)}
+          onConfirm={commit}
+        />
+      )}
     </div>
   );
 }
 
 function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
+  // 出航はやり直せないので確認を1枚。何人が乗れて何人が島に残るかを実数で見せる
+  const [confirm, setConfirm] = useState(false);
+  const need = view.seatsNeeded;
+  const boardable = Math.min(view.raftSeats, view.food, view.water);
+  const left = Math.max(0, need - boardable);
   return (
     <div className="panel escape">
       <h3>脱出のチャンス！</h3>
-      <p>船{view.raftSeats}（生存{view.seatsNeeded}人）・航海の水食料も十分。今、出航する？</p>
+      <p>船{view.raftSeats}（生存{need}人）・航海の水食料も十分。今、出航する？</p>
       <div className="panel-actions">
         <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>まだ残る</button>
-        <button className="btn primary" onClick={() => { playSound('escape'); api.escapeVote(true); }}>出航する！</button>
+        <button className="btn primary" onClick={() => { playSound('click'); setConfirm(true); }}>出航する！</button>
       </div>
+      {confirm && (
+        <ConfirmModal
+          title="今すぐ出航しますか？"
+          lead="出航に賛成したあとは取り消せません。全員の投票がそろうと結果が確定します。"
+          lines={[
+            { label: '船の席', value: `${view.raftSeats} 席（必要 ${need} 席）` },
+            { label: '航海の補給', value: `水 ${view.water}・食料 ${view.food}` },
+            { label: '乗れる人数', value: `${Math.min(boardable, need)} 人`, tone: 'good' },
+            ...(left > 0
+              ? ([{ label: '島に残る人', value: `${left} 人（置き去り）`, tone: 'danger' }] as ConfirmLine[])
+              : []),
+          ]}
+          confirmLabel="出航する"
+          cancelLabel="やめる"
+          onCancel={() => setConfirm(false)}
+          onConfirm={() => { playSound('escape'); api.escapeVote(true); setConfirm(false); }}
+        />
+      )}
     </div>
   );
 }
@@ -533,7 +800,7 @@ function PeekModal({ peek }: { peek: PublicGameState['peek'] }) {
   return (
     <div className="overlay" onClick={() => setClosed(true)}>
       <div className="modal item-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>🔭 {peek.targetName} の手札</h3>
+        <h3 className="with-ic"><GameIcon name="telescope" size={26} />{peek.targetName} の手札</h3>
         <div className="hand-cards" style={{ justifyContent: 'center' }}>
           {peek.hand.length === 0 && <p className="hint">手札なし</p>}
           {peek.hand.map((c) => {
@@ -592,7 +859,7 @@ function Chat({ view, chat, onSay }: { view: PublicGameState; chat: ChatMessage[
       <div className="chat-list" ref={ref}>
         {chat.length === 0 && <p className="hint">まだ発言はありません。下の定型文でサッと話せます。</p>}
         {chat.map((m) => (
-          <div key={m.id} className={`chat-msg ${m.isSpectator ? 'spec' : ''}`}><span className="chat-name">{m.isSpectator ? '👀' : ''}{m.name}</span><span className="chat-text">{m.text}</span></div>
+          <div key={m.id} className={`chat-msg ${m.isSpectator ? 'spec' : ''}`}><span className="chat-name">{m.isSpectator && <UiIcon name="eye" size={13} className="spec-ic" />}{m.name}</span><span className="chat-text">{m.text}</span></div>
         ))}
       </div>
       <div className="quick-row">
@@ -651,7 +918,8 @@ function WeatherFX({ view }: { view: PublicGameState }) {
 }
 
 interface Flight { key: string; icon: string; x: number; y: number; dx: number; dy: number; delay: number }
-const GAIN_ICON: Record<string, string> = { food: '🐟', water: '💧', wood: '🪵', card: '🃏' };
+/** 飛ぶトークンの絵柄（icons.tsx のキー）。 */
+const GAIN_ICON: Record<string, string> = { food: 'fish', water: 'water', wood: 'wood', card: 'card' };
 
 /** 資源・カード獲得の演出：トークンが取得元から場（資源カウンタ/筏）やプレイヤーへ1個ずつ飛ぶ。 */
 function FlyLayer({ view }: { view: PublicGameState }) {
@@ -685,7 +953,7 @@ function FlyLayer({ view }: { view: PublicGameState }) {
     const id0 = g.id;
     const arr: Flight[] = Array.from({ length: n }, (_, i) => ({
       key: `${id0}-${i}`,
-      icon: GAIN_ICON[g.kind] ?? '✨',
+      icon: GAIN_ICON[g.kind] ?? 'card',
       x: src!.x,
       y: src!.y,
       dx: tgt!.x - src!.x,
@@ -710,19 +978,20 @@ function FlyLayer({ view }: { view: PublicGameState }) {
           '--fdy': `${f.dy}px`,
         };
         return (
-          <span key={f.key} className="fly-token" style={style as CSSProperties}>{f.icon}</span>
+          <span key={f.key} className="fly-token" style={style as CSSProperties}><GameIcon name={f.icon} size={28} /></span>
         );
       })}
     </div>
   );
 }
 
+/** 事件演出の絵柄（icons.tsx のキー）とスタイル。 */
 const EV_META: Record<string, { ic: string; cls: string }> = {
-  hurricane: { ic: '🌀', cls: 'storm' },
-  death: { ic: '💀', cls: 'death' },
-  escape: { ic: '🛶', cls: 'escape' },
-  snake: { ic: '🐍', cls: 'snake' },
-  seat: { ic: '🛶', cls: 'seat' },
+  hurricane: { ic: 'wx-hurricane', cls: 'storm' },
+  death: { ic: 'skull', cls: 'death' },
+  escape: { ic: 'ship', cls: 'escape' },
+  snake: { ic: 'snake', cls: 'snake' },
+  seat: { ic: 'ship', cls: 'seat' },
 };
 
 /** 事件演出：画面フラッシュ＋シェイク＋大きな演出カード。 */
@@ -745,7 +1014,7 @@ function EventFX({ view }: { view: PublicGameState }) {
     return () => window.clearTimeout(t);
   }, [e?.id]);
   if (!cur) return null;
-  const meta = EV_META[cur.kind] ?? { ic: '❗', cls: 'info' };
+  const meta = EV_META[cur.kind] ?? { ic: 'alert', cls: 'info' };
   // 自分の木集めのヘビは WoodSplash（一枚絵）が担当するので、カードは重ねずフラッシュのみにする。
   const woodSplashHandles =
     cur.kind === 'snake' &&
@@ -757,7 +1026,7 @@ function EventFX({ view }: { view: PublicGameState }) {
       {cur.kind !== 'seat' && <div className={`fx-flash ${meta.cls}`} key={cur.id} />}
       {!woodSplashHandles && (
         <div className={`event-card ${meta.cls}`} key={`c${cur.id}`}>
-          <span className="ev-ic">{meta.ic}</span>
+          <GameIcon name={meta.ic} size={cur.kind === 'seat' ? 32 : 58} className="ev-ic" />
           <span className="ev-text">{shipText(cur.text)}</span>
         </div>
       )}
@@ -800,7 +1069,8 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
           <div><h4>島に消えた（{dead.length}）</h4><ul>{dead.map((p) => line(p))}{dead.length === 0 && <li className="hint">なし</li>}</ul></div>
         </div>
         <p className="hint">（カッコ内はAIの正体＝性格）</p>
-        <button className="btn primary" onClick={onLeave}>新しいゲームへ</button>
+        {/* 6人戦だと縦に長くなるので、この導線は結果カードの下端に貼り付けて必ず届くようにする */}
+        <button className="btn primary block result-cta" onClick={onLeave}>新しいゲームへ</button>
       </div>
     </div>
   );

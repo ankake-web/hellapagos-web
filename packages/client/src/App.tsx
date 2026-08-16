@@ -5,6 +5,7 @@ import { socket, connectSocket } from './socket.js';
 import { LocalRunner } from './game/localRunner.js';
 import { isMuted, playSound, toggleMute, startBgm, stopBgm, setBgmMood } from './sound.js';
 import { loadStats, recordResult, type Stats } from './stats.js';
+import { UiIcon } from './assets/icons.js';
 import { Backdrop } from './components/Backdrop.js';
 import { Home } from './components/Home.js';
 import { Lobby } from './components/Lobby.js';
@@ -229,9 +230,10 @@ export function App() {
       <button
         className="mute-btn"
         title={muted ? 'ミュート中（タップで音オン）' : 'BGM・効果音オン（タップでミュート）'}
+        aria-label={muted ? 'ミュート中（タップで音オン）' : 'BGM・効果音オン（タップでミュート）'}
         onClick={() => setMuted(toggleMute())}
       >
-        {muted ? '🔇' : '🔊'}
+        <UiIcon name={muted ? 'sound-off' : 'sound-on'} size={22} />
       </button>
       {session && view && <Menu midGame={view.phase !== 'lobby'} onLeave={leave} />}
       {showConnBanner && <div className="banner warn">サーバへ接続中…</div>}

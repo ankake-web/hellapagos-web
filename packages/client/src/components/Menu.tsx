@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { playSound } from '../sound.js';
+import { UiIcon } from '../assets/icons.js';
 import { Rules } from './Rules.js';
 import { Leaderboard } from './Leaderboard.js';
+import { ConfirmModal } from './Confirm.js';
 
 interface Props {
   /** ゲーム中（ロビー以外）か。退出時の注意書きを出し分ける。 */
@@ -25,16 +27,16 @@ export function Menu({ midGame, onLeave }: Props) {
         aria-label="メニュー"
         onClick={() => { playSound('click'); setOpen((o) => !o); }}
       >
-        ☰
+        <UiIcon name="menu" size={22} />
       </button>
 
       {open && (
         <>
           <div className="menu-scrim" onClick={close} />
           <div className="menu-panel" role="menu">
-            <button className="menu-item" onClick={() => { close(); setShowRules(true); }}>📖 遊び方</button>
-            <button className="menu-item" onClick={() => { close(); setShowRanking(true); }}>🏆 ランキング</button>
-            <button className="menu-item danger" onClick={() => { close(); setConfirm(true); }}>🏠 トップに戻る</button>
+            <button className="menu-item" onClick={() => { close(); setShowRules(true); }}><UiIcon name="book" size={18} />遊び方</button>
+            <button className="menu-item" onClick={() => { close(); setShowRanking(true); }}><UiIcon name="trophy" size={18} />ランキング</button>
+            <button className="menu-item danger" onClick={() => { close(); setConfirm(true); }}><UiIcon name="home" size={18} />トップに戻る</button>
           </div>
         </>
       )}
@@ -43,20 +45,20 @@ export function Menu({ midGame, onLeave }: Props) {
       {showRanking && <Leaderboard onClose={() => setShowRanking(false)} />}
 
       {confirm && (
-        <div className="overlay" onClick={() => setConfirm(false)}>
-          <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>トップに戻りますか？</h3>
-            <p className="hint">
-              {midGame
-                ? 'ゲームを抜けると、あなたの席はAIが引き継いで進行します。同じ部屋へは戻れません。'
-                : 'この部屋から退出してトップ画面に戻ります。'}
-            </p>
-            <div className="panel-actions">
-              <button className="btn ghost" onClick={() => setConfirm(false)}>キャンセル</button>
-              <button className="btn primary" onClick={() => { setConfirm(false); onLeave(); }}>トップに戻る</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          title="トップに戻りますか？"
+          danger={midGame}
+          lead={
+            midGame
+              ? 'ゲームを抜けると、あなたの席はAIが引き継いで進行します。同じ部屋へは戻れません。'
+              : 'この部屋から退出してトップ画面に戻ります。'
+          }
+          lines={midGame ? [{ label: 'この対戦', value: '離脱（戻れません）', tone: 'danger' }] : undefined}
+          confirmLabel="トップに戻る"
+          cancelLabel="キャンセル"
+          onCancel={() => setConfirm(false)}
+          onConfirm={() => { setConfirm(false); onLeave(); }}
+        />
       )}
     </>
   );
