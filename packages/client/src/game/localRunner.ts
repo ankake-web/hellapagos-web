@@ -1,4 +1,4 @@
-import { actionResult, actionSpeech, presentationTiming, type TableMoment } from '@hellapagos/shared';
+import { actionMoment, actionSpeech, presentationTiming, type TableMoment } from '@hellapagos/shared';
 // オフライン対戦のクライアント側ゲーム進行エンジン。
 // サーバ rooms.ts の drive() をブラウザ向けに移植（LLMは使わず scriptedNegotiation にフォールバック）。
 // 共有パッケージの純粋関数だけで完結するので、サーバ無しで CPU と1ゲーム遊べる。
@@ -163,16 +163,8 @@ export class LocalRunner {
     const before = this.state;
     this.state = takeAction(before, this.myId, action, woodPush);
     if (this.state !== before) {
-      const until = Date.now() + presentationTiming(before.config.speed).result;
-      this.tableMoment = {
-        id: Date.now(),
-        stage: 'result',
-        playerId: this.myId,
-        action,
-        ...actionResult(before, this.state, this.myId, action),
-        until,
-      };
-      this.holdUntil = until;
+      this.tableMoment = actionMoment(before, this.state, this.myId, action);
+      this.holdUntil = this.tableMoment.until;
     }
     this.drive();
   }
@@ -485,17 +477,8 @@ export class LocalRunner {
           const serum = after.hand.find((c) => c.kind === 'serum');
           if (serum) this.state = playCard(this.state, botId, serum.id);
         }
-        const result = actionResult(before, this.state, botId, decision.action);
-        const until = Date.now() + timing.result;
-        this.tableMoment = {
-          id: Date.now(),
-          stage: 'result',
-          playerId: botId,
-          action: decision.action,
-          ...result,
-          until,
-        };
-        this.holdUntil = until;
+        this.tableMoment = actionMoment(before, this.state, botId, decision.action);
+        this.holdUntil = this.tableMoment.until;
         this.drive();
       }, timing.announce);
     }, delay);
@@ -560,7 +543,14 @@ export class LocalRunner {
       if (onFire) onFire();
       else if (this.state.phase === 'action') {
         const actorId = currentActorId(this.state);
-        if (actorId) this.state = takeAction(this.state, actorId, 'fish', 0);
+        if (actorId) {
+          const before = this.state;
+          this.state = takeAction(before, actorId, 'fish', 0);
+          if (this.state !== before) {
+            this.tableMoment = actionMoment(before, this.state, actorId, 'fish');
+            this.holdUntil = this.tableMoment.until;
+          }
+        }
       }
       this.drive();
     }, ms);

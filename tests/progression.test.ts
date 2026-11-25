@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalRunner } from '../packages/client/src/game/localRunner.js';
 import { RoomManager } from '../packages/server/src/rooms.js';
-import { createGame, startGame, presentationTiming } from '../packages/shared/src/index.js';
+import { actionMoment, createGame, drawTiming, redactFor, RESOURCE_CAP, startGame, takeAction, presentationTiming } from '../packages/shared/src/index.js';
+import { emptyPlayback, gatheringPlayback, visibleTable } from '../packages/client/src/game/gatheringPlayback.js';
 import type { GameState, PublicGameState } from '../packages/shared/src/types.js';
 type Internal = { state: GameState; presentedRound: number; drive: () => void; clearTimers: () => void };
 const fixture = () => {
@@ -176,4 +177,83 @@ test('水晶玉CPUが先の席でも、無制限時間の投票が固まらな�
   inside.drive();
   assert.ok(inside.state.phase !== 'vote' || inside.state.pendingCard?.kind === 'tie');
   runner.dispose();
+});
+
+test('木の5玉を取り出して着地するまで、備蓄・病気・ログ・獲得トークンから結末が漏れない', () => {
+  const s = fixture();
+  const before = redactFor(s, 'p0', 'p0');
+  const after = takeAction(s, 'p0', 'wood', 5);
+  const live = redactFor(after, 'p0', 'p0');
+  live.tableMoment = actionMoment(s, after, 'p0', 'wood');
+  const id = live.tableMoment.id;
+  let p = gatheringPlayback(gatheringPlayback(emptyPlayback, { view: before }), { view: live });
+  assert.deepEqual(p.gathering!.balls, after.lastDraw!.balls);
+  for (let i = 0; i <= 5; i++) {
+    const shown = visibleTable(p)!;
+    assert.equal(p.gathering!.revealed, i);
+    assert.equal(shown.log, before.log);
+    assert.equal(shown.players, before.players);
+    assert.equal(shown.lastGain, before.lastGain);
+    assert.equal(shown.raftProgress, before.raftProgress);
+    assert.equal(shown.lastDraw, before.lastDraw);
+    assert.equal(shown.tableMoment!.title, '');
+    assert.equal(shown.isYourTurn, false);
+    p = gatheringPlayback(p, { view: { ...live } });
+    p = gatheringPlayback(p, { reveal: id, step: i + 1 });
+    assert.equal(gatheringPlayback(p, { reveal: id, step: i + 1 }), p);
+  }
+  assert.equal(visibleTable(p), p.live);
+  assert.equal(p.gathering!.settled, true);
+});
+
+test('水くみは直前の釣り玉を使わず、水筒と備蓄上限を反映。安全な木も袋を引かない', () => {
+  const s = fixture();
+  s.currentPrecip = 3;
+  s.water = RESOURCE_CAP - 1;
+  s.players[0].revealed = ['canteen', 'axe'];
+  s.lastDraw = { playerId: 'p0', action: 'fish', balls: [{ fish: 2 }] };
+  for (const action of ['water', 'wood'] as const) {
+    const after = takeAction(s, 'p0', action);
+    const live = redactFor(after, 'viewer', 'p0');
+    live.tableMoment = actionMoment(s, after, 'p0', action);
+    const p = gatheringPlayback(gatheringPlayback(emptyPlayback, { view: redactFor(s, 'viewer', 'p0') }), { view: live });
+    assert.deepEqual(p.gathering!.balls, []);
+    assert.equal(p.gathering!.steps, 1);
+    assert.equal(visibleTable(p)!.water, s.water);
+    const result = visibleTable(gatheringPlayback(p, { reveal: live.tableMoment.id, step: 1 }))!;
+    assert.equal(result, live);
+    if (action === 'water') {
+      assert.match(result.tableMoment!.title, /6杯/);
+      assert.match(result.tableMoment!.detail, /上限/);
+      assert.equal(result.water, RESOURCE_CAP);
+    } else assert.match(result.tableMoment!.title, /2本/);
+  }
+});
+
+test('再接続では完了済みの結果を表示し、次の手番に移った後は古いタイマーを無視する', () => {
+  const s = fixture();
+  s.food = RESOURCE_CAP;
+  s.players[0].revealed = ['fishing_rod'];
+  const after = takeAction(s, 'p0', 'fish');
+  const live = redactFor(after, 'p0', 'p0');
+  live.tableMoment = actionMoment(s, after, 'p0', 'fish');
+  const caught = after.lastDraw!.balls.reduce((n, b) => n + ('fish' in b ? b.fish : 3), 0);
+  assert.match(live.tableMoment.title, new RegExp(caught + '匹'));
+  assert.match(live.tableMoment.detail, /上限/);
+  const rejoin = gatheringPlayback(emptyPlayback, { view: live });
+  assert.equal(rejoin.gathering!.revealed, 2);
+  assert.equal(visibleTable(rejoin), live);
+  const next = gatheringPlayback(rejoin, { view: { ...live, tableMoment: undefined } });
+  assert.equal(next.gathering, null);
+  assert.equal(gatheringPlayback(next, { reveal: live.tableMoment.id, step: 1 }), next);
+});
+
+test('全速度で木の5玉目が着地してから結果を読む時間を取る', () => {
+  for (const speed of ['fast', 'normal', 'slow'] as const) {
+    const s = fixture();
+    s.config.speed = speed;
+    const m = actionMoment(s, takeAction(s, 'p0', 'wood', 5), 'p0', 'wood');
+    const t = drawTiming(speed);
+    assert.ok(m.until - m.id - t.first - 4 * t.next - 360 >= 700);
+  }
 });

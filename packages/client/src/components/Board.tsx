@@ -14,9 +14,13 @@ import { BotFace, GameIcon, UiIcon, botIndexOf } from '../assets/icons.js';
 import { ART } from '../assets/manifest.js';
 import { playSound } from '../sound.js';
 import { ConfirmModal, type ConfirmLine } from './Confirm.js';
+import { GatheringScene } from './GatheringScene.js';
+import type { Gathering } from '../game/gatheringPlayback.js';
 
 interface Props {
   view: PublicGameState;
+  gathering: Gathering | null;
+  onReveal: () => void;
   chat: ChatMessage[];
   onSay: (text: string) => void;
   onLeave: () => void;
@@ -59,14 +63,14 @@ function weatherLabel(v: PublicGameState): string {
   return `雨（降水${v.currentPrecip}）`;
 }
 
-export function Board({ view, chat, onSay, onLeave }: Props) {
+export function Board({ view, gathering, onReveal, chat, onSay, onLeave }: Props) {
   const me = view.players.find((p) => p.isYou);
   const [targeting, setTargeting] = useState<{ card: Card; mode: 'gun' | 'voodoo' | 'telescope' } | null>(null);
   // 対象を選んだ直後の確認シート（射撃は特に取り返しがつかないので必ず1枚挟む）
   const [targetConfirm, setTargetConfirm] = useState<PublicPlayer | null>(null);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [tab, setTab] = useState<'log' | 'chat'>('log');
-  const freshDraw = useFreshDraw(view);
+  const freshDraw = useFreshDraw(view, gathering);
 
   useEffect(() => {
     setTargeting(null);
@@ -95,7 +99,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
   return (
     <div className={`board ${weatherClass}`}>
       <Header view={view} />
-      <TableTheater view={view} />
+      <TableTheater view={view} gathering={gathering} onReveal={onReveal} />
       <HandBar me={me} onSelect={setSelectedCard} />
       <WeatherFX view={view} />
       <RoundSplash view={view} />
@@ -163,14 +167,14 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
 }
 
 /** 卓の中央で、誰が・何を選び・どうなったかを一つずつ見届ける。 */
-function TableTheater({ view }: { view: PublicGameState }) {
+function TableTheater({ view, gathering, onReveal }: Pick<Props, 'view' | 'gathering' | 'onReveal'>) {
   const theaterRef = useRef<HTMLElement>(null);
   const m = view.tableMoment;
   useEffect(() => {
     const el = theaterRef.current;
     if (!m || !el) return;
     const box = el.getBoundingClientRect();
-    if (box.bottom < 80 || box.top < 0)
+    if (box.bottom < 80 || box.top < 0 || box.top > window.innerHeight - 80)
       el.scrollIntoView({
         block: 'start',
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
@@ -200,6 +204,10 @@ function TableTheater({ view }: { view: PublicGameState }) {
     m?.stage === 'result' && m.playerId === view.youId && m.action === 'search' && m.title === '漂着物カードを1枚発見'
       ? me?.hand?.at(-1)
       : undefined;
+  if (gathering)
+    return <section ref={theaterRef} className="table-theater has-gather" aria-label="採集の卓" aria-live="polite">
+      <GatheringScene key={gathering.id} view={view} g={gathering} onReveal={onReveal} />
+    </section>;
   return (
     <section ref={theaterRef} className={`table-theater stage-${stage}`} aria-label="卓の様子" aria-live="polite">
       <div className="theater-avatar">
@@ -257,7 +265,7 @@ function TableTheater({ view }: { view: PublicGameState }) {
 }
 
 /** 直近の袋引き（lastDraw）を一定時間だけ「新鮮」とみなして返す。 */
-function useFreshDraw(view: PublicGameState): PublicGameState['lastDraw'] | null {
+function useFreshDraw(view: PublicGameState, gathering: Gathering | null): PublicGameState['lastDraw'] | null {
   const [fresh, setFresh] = useState<PublicGameState['lastDraw'] | null>(null);
   const ref = useRef('');
   const d = view.lastDraw;
@@ -268,11 +276,15 @@ function useFreshDraw(view: PublicGameState): PublicGameState['lastDraw'] | null
   useEffect(() => {
     if (!d || !d.balls.length || sig === ref.current) return;
     ref.current = sig;
+    if (gathering && gathering.action === d.action && gathering.playerId === d.playerId) {
+      setFresh(null);
+      return;
+    }
     setFresh(d);
     const id = window.setTimeout(() => setFresh(null), 1700);
     return () => window.clearTimeout(id);
   }, [sig]);
-  return fresh;
+  return gathering ? null : fresh;
 }
 
 /** 対象を選ぶカード（拳銃・ブードゥー人形・望遠鏡）の確認シート。
@@ -759,7 +771,7 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
   }
   const commit = () => {
     if (!confirm) return;
-    playSound(confirm.action);
+    playSound('click');
     api.choose(confirm.action, confirm.action === 'wood' ? confirm.wood : undefined);
     setConfirm(null);
   };
@@ -768,7 +780,7 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
       playSound('click');
       setConfirm({ action, wood: n });
     } else {
-      playSound(action);
+      playSound(action === 'search' ? 'search' : 'click');
       api.choose(action, n);
     }
   };
@@ -1564,6 +1576,7 @@ const GAIN_ICON: Record<string, string> = { food: 'fish', water: 'water', wood: 
 /** 資源・カード獲得の演出：トークンが取得元から場（資源カウンタ/筏）やプレイヤーへ1個ずつ飛ぶ。 */
 function FlyLayer({ view }: { view: PublicGameState }) {
   const [flights, setFlights] = useState<Flight[]>([]);
+  const priorTable = useRef(view);
   // マウント時点の lastGain は「過去の獲得」なので再生しない（再接続/リロード対策）。
   const seen = useRef(view.lastGain?.id ?? -1);
   const timers = useRef<number[]>([]);
@@ -1575,8 +1588,11 @@ function FlyLayer({ view }: { view: PublicGameState }) {
   );
   const g = view.lastGain;
   useEffect(() => {
+    const prior = priorTable.current;
+    priorTable.current = view;
     if (!g || g.id === seen.current) return;
     seen.current = g.id;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const centerOf = (el: Element | null): { x: number; y: number } | null => {
       const r = el?.getBoundingClientRect();
       return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
@@ -1591,11 +1607,18 @@ function FlyLayer({ view }: { view: PublicGameState }) {
     } else {
       const sel =
         g.kind === 'food' ? '[data-fly="food"]' : g.kind === 'water' ? '[data-fly="water"]' : '[data-fly="raft"]';
-      src = centerOf(pcard) ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+      src = centerOf(document.querySelector('[data-gather-source]')) ?? centerOf(pcard) ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
       tgt = centerOf(document.querySelector(sel));
     }
     if (!src || !tgt) return;
-    const n = Math.min(Math.max(1, g.amount), 6);
+    let amount = g.amount;
+    const action = view.tableMoment?.stage === 'result' ? view.tableMoment.action : undefined;
+    if (action === 'fish' && g.kind === 'food') amount = view.food - prior.food;
+    if (action === 'water' && g.kind === 'water') amount = view.water - prior.water;
+    if (action === 'wood' && g.kind === 'wood')
+      amount = (view.raftSeats - prior.raftSeats) * RAFT_LOOP + view.raftProgress - prior.raftProgress;
+    if (amount <= 0) return;
+    const n = Math.min(amount, 6);
     const id0 = g.id;
     const arr: Flight[] = Array.from({ length: n }, (_, i) => ({
       key: `${id0}-${i}`,
@@ -1611,7 +1634,7 @@ function FlyLayer({ view }: { view: PublicGameState }) {
     // （deps変化時に前のタイマーをclearすると、前回トークンが残り続けるため）。
     const t = window.setTimeout(() => setFlights((f) => f.filter((x) => !x.key.startsWith(`${id0}-`))), 850 + n * 130);
     timers.current.push(t);
-  }, [g?.id]);
+  }, [view]);
   if (flights.length === 0) return null;
   return (
     <div className="fly-layer" aria-hidden>
@@ -1665,6 +1688,10 @@ function EventFX({ view }: { view: PublicGameState }) {
       : e.text.includes('船に乗れる') || e.text.includes('座席が')
         ? 'seat'
         : (e.kind ?? 'info');
+    if (view.tableMoment?.action === 'wood' && (kind === 'snake' || kind === 'seat')) {
+      setCur(null);
+      return;
+    }
     setCur({ id: e.id, kind, text: e.text });
     if (kind === 'death' || kind === 'snake' || kind === 'hurricane') {
       document.documentElement.classList.add('fx-shake');

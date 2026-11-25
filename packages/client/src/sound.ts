@@ -2,6 +2,10 @@
 
 export type SoundName =
   | 'click'
+  | 'rattle'
+  | 'token'
+  | 'pour'
+  | 'timber'
   | 'fish'
   | 'water'
   | 'wood'
@@ -105,6 +109,24 @@ export function playSound(name: SoundName): void {
   if (!ac) return;
 
   switch (name) {
+    case 'rattle':
+      for (const delay of [0, .065, .21, .26]) {
+        noise(.065, .045, delay);
+        tone({ freq: 360, to: 160, dur: .042, type: 'triangle', gain: .07, delay });
+      }
+      break;
+    case 'token':
+      tone({ freq: 760, to: 310, dur: .057, type: 'triangle', gain: .12 });
+      tone({ freq: 400, to: 185, dur: .075, type: 'sine', gain: .07, delay: .075 });
+      break;
+    case 'pour':
+      for (const [i, freq] of [730, 830, 960].entries())
+        tone({ freq, to: freq * .7, dur: .11, gain: .065, delay: i * .15 });
+      break;
+    case 'timber':
+      noise(.08, .065);
+      tone({ freq: 150, to: 60, dur: .14, type: 'triangle', gain: .14 });
+      break;
     case 'click':
       tone({ freq: 420, dur: 0.06, type: 'triangle', gain: 0.08 });
       break;

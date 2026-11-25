@@ -1,4 +1,4 @@
-import { actionResult, actionSpeech, presentationTiming, type TableMoment } from '@hellapagos/shared';
+import { actionMoment, actionSpeech, presentationTiming, type TableMoment } from '@hellapagos/shared';
 import type { Server } from 'socket.io';
 import { recordResult } from './leaderboard.js';
 import { botSpeak, llmEnabled, type SpeakCtx } from './llm.js';
@@ -246,16 +246,8 @@ export class RoomManager {
     const before = room.state;
     room.state = takeAction(before, playerId, action, woodPush);
     if (room.state !== before) {
-      const until = Date.now() + presentationTiming(before.config.speed).result;
-      room.tableMoment = {
-        id: Date.now(),
-        stage: 'result',
-        playerId: playerId,
-        action,
-        ...actionResult(before, room.state, playerId, action),
-        until,
-      };
-      room.holdUntil = until;
+      room.tableMoment = actionMoment(before, room.state, playerId, action);
+      room.holdUntil = room.tableMoment.until;
     }
     this.drive(room);
   }
@@ -585,17 +577,8 @@ export class RoomManager {
           const serum = after.hand.find((c) => c.kind === 'serum');
           if (serum) room.state = playCard(room.state, botId, serum.id);
         }
-        const result = actionResult(before, room.state, botId, decision.action);
-        const until = Date.now() + timing.result;
-        room.tableMoment = {
-          id: Date.now(),
-          stage: 'result',
-          playerId: botId,
-          action: decision.action,
-          ...result,
-          until,
-        };
-        room.holdUntil = until;
+        room.tableMoment = actionMoment(before, room.state, botId, decision.action);
+        room.holdUntil = room.tableMoment.until;
         this.drive(room);
       }, timing.announce);
     }, delay);
@@ -769,7 +752,14 @@ export class RoomManager {
       if (onFire) onFire();
       else if (room.state.phase === 'action') {
         const actorId = currentActorId(room.state);
-        if (actorId) room.state = takeAction(room.state, actorId, 'fish', 0);
+        if (actorId) {
+          const before = room.state;
+          room.state = takeAction(before, actorId, 'fish', 0);
+          if (room.state !== before) {
+            room.tableMoment = actionMoment(before, room.state, actorId, 'fish');
+            room.holdUntil = room.tableMoment.until;
+          }
+        }
       }
       this.drive(room);
     }, ms);

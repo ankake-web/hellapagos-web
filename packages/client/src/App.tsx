@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ChatMessage, PublicGameState } from '@hellapagos/shared';
+import { drawTiming } from '@hellapagos/shared';
+import { emptyPlayback, gatheringPlayback, visibleTable } from './game/gatheringPlayback.js';
 import { api, clearSession, loadSession, saveSession, setLocalRunner, type Session } from './api.js';
 import { socket, connectSocket } from './socket.js';
 import { LocalRunner } from './game/localRunner.js';
@@ -13,7 +15,21 @@ import { Board } from './components/Board.js';
 import { Menu } from './components/Menu.js';
 
 export function App() {
-  const [view, setView] = useState<PublicGameState | null>(null);
+  const [playback, dispatch] = useReducer(gatheringPlayback, emptyPlayback);
+  const view = useMemo(() => visibleTable(playback), [playback]);
+  const setView = (next: PublicGameState | null) => dispatch({ view: next });
+  const gather = playback.gathering;
+  const gatherSpeed = playback.live?.config.speed;
+  const revealNext = () => {
+    if (gather) dispatch({ reveal: gather.id, step: gather.revealed + 1 });
+  };
+  useEffect(() => {
+    if (!gather || !gatherSpeed || gather.settled) return;
+    const timing = drawTiming(gatherSpeed);
+    const delay = gather.revealed === gather.steps ? 360 : gather.revealed === 0 ? timing.first : timing.next;
+    const timer = window.setTimeout(revealNext, delay);
+    return () => window.clearTimeout(timer);
+  }, [gather, gatherSpeed]);
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(socket.connected);
@@ -93,7 +109,7 @@ export function App() {
     if (newest) r.logId = newest.id;
     if (sawDeath) playSound('death');
     if (sawEscape) playSound('escape');
-    if (sawSnake) playSound('snake');
+    if (sawSnake && !(view.tableMoment?.action === 'wood' && view.tableMoment.stage === 'result')) playSound('snake');
 
     const w = view.hurricaneRevealed ? 'storm' : `p${view.currentPrecip}`;
     if (w !== r.weather) {
@@ -221,7 +237,7 @@ export function App() {
   } else if (view.phase === 'lobby') {
     screen = <Lobby view={view} onLeave={leave} offline={!!session?.offline} />;
   } else {
-    screen = <Board view={view} chat={chat} onSay={api.say} onLeave={leave} />;
+    screen = <Board view={view} gathering={gather} onReveal={revealNext} chat={chat} onSay={api.say} onLeave={leave} />;
   }
 
   return (

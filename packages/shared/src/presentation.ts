@@ -1,10 +1,31 @@
 import type { ActionType, GameState, Player, Speed, TableMoment } from './types.js';
+import { MAX_SEATS, RAFT_LOOP } from './content.js';
+import { hasPermanent } from './engine.js';
 
 /** ゲームの確率・判断と切り離した、卓で結果を見届けるための時間。 */
 export function presentationTiming(speed: Speed) {
   if (speed === 'slow') return { think: [3000, 4200] as const, announce: 1600, result: 3100, round: 2700 };
   if (speed === 'fast') return { think: [1100, 1700] as const, announce: 900, result: 1800, round: 2100 };
   return { think: [1900, 2900] as const, announce: 1300, result: 2500, round: 2400 };
+}
+
+/** 袋を振ってから最初の玉が落ちるまでの間と、次の玉を見せる間隔。 */
+export function drawTiming(speed: Speed) {
+  if (speed === 'slow') return { first: 1550, next: 650 };
+  if (speed === 'fast') return { first: 700, next: 320 };
+  return { first: 1200, next: 510 };
+}
+
+export function actionMoment(before: GameState, after: GameState, playerId: string, action: ActionType): TableMoment {
+  const draw = after.lastDraw;
+  const count = draw?.action === action && draw.playerId === playerId ? draw.balls.length : 0;
+  const speed = before.config.speed;
+  const id = Date.now();
+  return {
+    id, stage: 'result', playerId, action,
+    ...actionResult(before, after, playerId, action),
+    until: id + presentationTiming(speed).result + Math.max(0, count - 1) * drawTiming(speed).next,
+  };
 }
 
 export const ACTION_SCENE: Record<ActionType, { place: string; title: string }> = {
@@ -58,29 +79,36 @@ export function actionResult(
   const beforePlayer = before.players.find((p) => p.id === playerId)!;
   const afterPlayer = after.players.find((p) => p.id === playerId)!;
   if (action === 'fish') {
-    const n = Math.max(0, after.food - before.food);
+    const caught = after.lastDraw!.balls.reduce((sum, ball) => sum + ('fish' in ball ? ball.fish : 3), 0);
+    const stored = after.food - before.food;
     return {
-      title: n ? `食料 +${n}` : '今回は不漁…',
-      detail: n ? '釣れた魚が、みんなの蓄えに加わった。' : '食料は増えなかった。',
+      title: `${caught}匹、釣れた！`,
+      detail: `食料 ${before.food} → ${after.food}${stored < caught ? '（備蓄の上限）' : ''}`,
     };
   }
-  if (action === 'water')
-    return { title: `水 +${Math.max(0, after.water - before.water)}`, detail: '集めた水が、みんなの蓄えに加わった。' };
+  if (action === 'water') {
+    const collected = before.currentPrecip * (hasPermanent(beforePlayer, 'canteen') ? 2 : 1);
+    return {
+      title: collected ? `雨水を${collected}杯くんだ！` : '今日は雨が降らなかった',
+      detail: `水 ${before.water} → ${after.water}${after.water - before.water < collected ? '（備蓄の上限）' : ''}`,
+    };
+  }
   if (action === 'wood') {
-    const n = (after.raftSeats - before.raftSeats) * 6 + after.raftProgress - before.raftProgress;
+    const n = after.lastWoodGain?.playerId === playerId ? after.lastWoodGain.amount : 0;
     const snake =
       after.lastDraw?.playerId === playerId &&
       after.lastDraw.action === 'wood' &&
       after.lastDraw.balls.some((b) => 'snake' in b);
     return {
-      title: snake ? (afterPlayer.sick ? 'ヘビに噛まれた！' : '血清でヘビの毒を治した') : `木材 +${Math.max(0, n)}`,
+      title: snake ? (afterPlayer.sick ? '黒玉！ ヘビに噛まれた' : '黒玉！ 血清で毒を消した') : `木材${Math.max(0, n)}本を持ち帰った！`,
       detail: snake
         ? afterPlayer.sick
-          ? '追加分は失った。確保した木は残るが、次のラウンドは休み。'
+          ? `入口の${n}本は確保。次のラウンドは休み。`
           : '休まずにすむ代わりに、今回集めた木は失った。'
         : after.raftSeats > before.raftSeats
-          ? 'いかだに乗れる人数が増えた！'
-          : 'いかだの建造が進んだ。',
+          ? `いかだが完成！ 乗れる人数 ${before.raftSeats} → ${after.raftSeats}人`
+          : after.raftSeats >= MAX_SEATS ? `いかだは${MAX_SEATS}人分まで完成。`
+          : `次の席まで、あと${RAFT_LOOP - after.raftProgress}本。`,
     };
   }
   const n = Math.max(0, afterPlayer.hand.length - beforePlayer.hand.length);
