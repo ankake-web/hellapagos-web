@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './presentation.js';
 export * from './deckConfig.js';
 export * from './content.js';
 export * from './rng.js';

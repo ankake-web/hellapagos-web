@@ -1,3 +1,5 @@
+> これは旧MVP時代の点検記録。現在の仕様は RULES.md と cardCatalog.ts、および自動テストを参照。74枚構成・釣り竿・ほら貝などは後から修正されており、下記の旧「復元値」は使用しない。
+
 # RULES_GAP — 現行実装と公式ルールの差分（Phase 0）
 
 現行は突貫MVP（`packages/shared/src/{engine,types,content,view}.ts` 計 ~1000行）。公式ルール仕様（依頼書）と突き合わせた差分を列挙する。★=要再実装の大物。

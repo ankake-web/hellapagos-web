@@ -1,9 +1,11 @@
 // ヘルパゴスのSVGアイコン集（外部画像なしで一貫した手描き風ベクター）。
 // 48×48 の viewBox に統一。色は航海日誌風の暖色パレット、暗いガラス面でも視認できる配色。
 // 実画像PNG（assets/cards/<key>.png）があれば manifest 経由でそちらを優先表示する。
-import { BG_ART, CARD_ART } from './manifest';
+import { ART, BG_ART, CARD_ART } from './manifest';
+import { EXTRA_ICON_SVG } from './extraIcons';
 
 const ICON_SVG: Record<string, string> = {
+  ...EXTRA_ICON_SVG,
   // ===== 盤面グリフ =====
   fish: `<g stroke="#16242c" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M9 24c0-7 7-11 14-11s13 4 13 11-6 11-13 11S9 31 9 24Z" fill="#1d5a6e"/><polygon points="36,24 44,16 44,32" fill="#2b9fd6"/><path d="M20 13c2-4 6-5 9-3-3 2-5 5-5 9Z" fill="#2b9fd6"/><path d="M11 27c4 4 10 4 15 1-2 4-7 6-12 5-2-1-3-4-3-6Z" fill="#6fd0f5"/></g><circle cx="16" cy="22" r="2.2" fill="#16242c"/>`,
   water: `<path d="M24 6C24 6 12 22 12 31a12 12 0 0 0 24 0C36 22 24 6 24 6Z" fill="#6fd0f5" stroke="#16242c" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M24 19c-3 4-5 8-5 12a5 5 0 0 0 5 5Z" fill="#2b9fd6" opacity="0.55"/><ellipse cx="20" cy="29" rx="2.4" ry="3.6" fill="#f4f8f7" opacity="0.85"/>`,
@@ -66,6 +68,9 @@ const UI_SVG: Record<string, string> = {
   'sound-on': `<path d="M4 9.5h3.6L12.5 5v14L7.6 14.5H4Z"/><path d="M16.2 8.8a4.6 4.6 0 0 1 0 6.4"/><path d="M19 6a8.6 8.6 0 0 1 0 12"/>`,
   'sound-off': `<path d="M4 9.5h3.6L12.5 5v14L7.6 14.5H4Z"/><line x1="16.5" y1="9.5" x2="22" y2="15"/><line x1="22" y1="9.5" x2="16.5" y2="15"/>`,
   eye: `<path d="M2.5 12S6 6.2 12 6.2 21.5 12 21.5 12 18 17.8 12 17.8 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/>`,
+  // 航海日誌（記録タブ）。同じUIクロームの「チャット」と同じ線画の言語で揃える。
+  log: `<path d="M6 3.5h8.2L19 8.3v12.2H6Z"/><path d="M14.2 3.5v4.8H19"/><line x1="9" y1="12.5" x2="16" y2="12.5"/><line x1="9" y1="16" x2="13.5" y2="16"/>`,
+  chat: `<path d="M4 5.5h16v11h-8l-4.5 4v-4H4Z"/><line x1="8" y1="9.6" x2="16" y2="9.6"/><line x1="8" y1="13" x2="13" y2="13"/>`,
 };
 
 const HERO_SVG = `<defs><linearGradient id="heroSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#11314a"/><stop offset="0.55" stop-color="#1c5167"/><stop offset="1" stop-color="#e89b5a"/></linearGradient><radialGradient id="heroSun" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffd479"/><stop offset="0.6" stop-color="#ff9f43"/><stop offset="1" stop-color="#ff9f43" stop-opacity="0"/></radialGradient></defs><rect x="0" y="0" width="320" height="180" fill="url(#heroSky)"/><circle cx="258" cy="96" r="42" fill="url(#heroSun)"/><circle cx="258" cy="96" r="16" fill="#ffd479" opacity="0.9"/><circle cx="40" cy="30" r="1.1" fill="#f4f8f7" opacity="0.8"/><circle cx="96" cy="22" r="0.9" fill="#f4f8f7" opacity="0.7"/><circle cx="150" cy="16" r="0.8" fill="#f4f8f7" opacity="0.6"/><polygon points="68,42 69,45 72,46 69,47 68,50 67,47 64,46 67,45" fill="#f4f8f7" opacity="0.55"/><g opacity="0.95"><ellipse cx="42" cy="58" rx="40" ry="18" fill="#1a2730"/><ellipse cx="78" cy="54" rx="34" ry="15" fill="#2a3b47"/><ellipse cx="30" cy="70" rx="30" ry="13" fill="#2a3b47"/><ellipse cx="60" cy="72" rx="30" ry="12" fill="#1a2730"/></g><line x1="46" y1="70" x2="40" y2="82" stroke="#cfeaff" stroke-width="1.4" opacity="0.75"/><line x1="40" y1="82" x2="45" y2="82" stroke="#cfeaff" stroke-width="1.4" opacity="0.75"/><line x1="45" y1="82" x2="38" y2="94" stroke="#cfeaff" stroke-width="1.4" opacity="0.6"/><path d="M82,40 q-3,-2 -6,1" fill="none" stroke="#16242c" stroke-width="1" opacity="0.7"/><path d="M82,40 q3,-2 6,1" fill="none" stroke="#16242c" stroke-width="1" opacity="0.7"/><path d="M104,52 q-2.5,-1.6 -5,0.8" fill="none" stroke="#16242c" stroke-width="0.9" opacity="0.6"/><path d="M104,52 q2.5,-1.6 5,0.8" fill="none" stroke="#16242c" stroke-width="0.9" opacity="0.6"/><rect x="0" y="112" width="320" height="68" fill="#1d5a6e"/><path d="M0,124 q40,-7 80,0 t80,0 t80,0 t80,0 v60 H0 Z" fill="#14444f"/><path d="M0,140 q50,-8 100,0 t100,0 t100,0 v40 H0 Z" fill="#0e3a47"/><path d="M0,158 q60,-6 120,0 t120,0 t120,0 v22 H0 Z" fill="#0a2c37"/><ellipse cx="126" cy="134" rx="66" ry="20" fill="#d8bd81"/><ellipse cx="122" cy="129" rx="54" ry="15" fill="#ecdcae"/><path d="M118,128 q5,-30 -2,-52" fill="none" stroke="#5e3a20" stroke-width="4" stroke-linecap="round"/><path d="M116,77 q-22,-10 -34,-4 q16,-2 32,6" fill="#3f8a5a"/><path d="M116,77 q-20,-16 -30,-18 q14,4 30,12" fill="#5fb27a"/><path d="M116,77 q22,-12 36,-8 q-18,0 -32,8" fill="#5fb27a"/><path d="M116,77 q18,-18 28,-20 q-12,6 -26,16" fill="#3f8a5a"/><path d="M116,77 q6,-20 4,-30 q-2,16 -4,30" fill="#5fb27a"/><g transform="rotate(-4 150 138)"><rect x="132" y="132" width="54" height="5" rx="2" fill="#8a5a34"/><rect x="132" y="138" width="54" height="5" rx="2" fill="#5e3a20"/><rect x="132" y="144" width="50" height="5" rx="2" fill="#8a5a34"/><rect x="134" y="126" width="5" height="24" rx="2" fill="#5e3a20"/><rect x="178" y="126" width="5" height="24" rx="2" fill="#5e3a20"/><line x1="148" y1="128" x2="152" y2="148" stroke="#16242c" stroke-width="1" opacity="0.5"/><line x1="166" y1="128" x2="170" y2="148" stroke="#16242c" stroke-width="1" opacity="0.5"/></g>`;
@@ -142,5 +147,40 @@ export function HeroArt({ className }: { className?: string }) {
   }
   return (
     <svg viewBox="0 0 320 180" className={className} role="img" aria-label="無人島の夕暮れ" preserveAspectRatio="xMidYMid slice" dangerouslySetInnerHTML={{ __html: HERO_SVG }} />
+  );
+}
+
+/** ボットの通し番号（1始まり・参加順）。顔絵 art/bot-<n>.* と色の割り当てに使う。 */
+export function botIndexOf(players: { id: string; isBot: boolean }[], id: string): number {
+  return players.filter((p) => p.isBot).findIndex((p) => p.id === id) + 1;
+}
+
+/** CPUの顔。実画像が無い場合は参加順ごとに異なる肖像を描く。性格は公開しない。 */
+export function BotFace({ name, index, size = 24, className }: { name: string; index: number; size?: number; className?: string }) {
+  const cls = ['pc-face', 'bot', className].filter(Boolean).join(' ');
+  const art = ART[`bot-${index}`];
+  if (art) {
+    return <img className={cls} src={art} alt="CPU" title="CPU" width={size} height={size} style={{ width: size, height: size }} />;
+  }
+  const n=(Math.max(1,index)-1)%6;
+  const skin=['#e2b98f','#bd8e6d','#edc9a7','#d3a681','#b88866','#efcfb0'][n];
+  const hair=['#4a342b','#2c3d43','#6c4936','#d5c4a0','#373432','#915d42'][n];
+  const shirt=['#d39b59','#7ba8b0','#9b9b6f','#ba8374','#6f99a1','#d1ad70'][n];
+  const outline='#203c42';
+  return (
+    <svg className={cls} viewBox="0 0 64 64" width={size} height={size} role="img" aria-label={`${name}（CPU）`} style={{width:size,height:size,flexShrink:0,borderRadius:'50%'}}>
+      <circle cx="32" cy="32" r="31" fill="#d8c69d"/>
+      <path d="M9 65q1-21 23-21t23 21" fill={shirt} stroke={outline} strokeWidth="1.5"/>
+      <path d="M26 41v9q6 5 12 0v-9" fill={skin} stroke={outline} strokeWidth="1.5"/>
+      <ellipse cx="32" cy="29" rx="17" ry="21" fill={skin} stroke={outline} strokeWidth="1.5"/>
+      <path d={n%3===0?'M15 29V17Q19 3 35 7q17 0 15 24l-7-14q-15 7-24 2z':n%3===1?'M15 28Q9 8 27 7 47 2 49 24L39 14l-3 8-8-7-8 13z':'M15 25Q12 7 31 7q20-1 19 19l-5-9q-14 4-27 0z'} fill={hair} stroke={outline} strokeWidth="1.5"/>
+      {n===1&&<path d="M12 19q20-8 40 0l-1 8q-19-7-37 0z" fill="#b76253" stroke={outline} strokeWidth="1.5"/>}
+      <path d="m22 27 6-1m9 0 6 1" fill="none" stroke={hair} strokeWidth="2" strokeLinecap="round"/>
+      <ellipse cx="25" cy="31" rx="1.7" ry="2.4" fill={outline}/><ellipse cx="40" cy="31" rx="1.7" ry="2.4" fill={outline}/>
+      {n===2&&<g stroke={outline} strokeWidth="1.5" fill="none"><circle cx="24" cy="31" r="6"/><circle cx="40" cy="31" r="6"/><path d="M30 31h4"/></g>}
+      <path d="m32 32-2 6h4m-9 5q7 5 14-1" fill="none" stroke={outline} strokeWidth="1.4" strokeLinecap="round"/>
+      {n===4&&<path d="M20 40q12 10 24 0l-4 11H25z" fill={hair} opacity=".7"/>}
+      {n===5&&<path d="M15 18 18 6h28l5 12zM9 19h47" fill="#d8ae6a" stroke={outline} strokeWidth="2"/>}
+    </svg>
   );
 }

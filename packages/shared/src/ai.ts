@@ -1,9 +1,61 @@
 import { difficultyParams } from './content.js';
 import { aliveCount, hasPermanent } from './engine.js';
 import { Rng } from './rng.js';
-import type { ActionType, BotPersona, CardKind, Difficulty, GameState, Player } from './types.js';
+import type { ActionType, BotPersona, CardKind, CardOptions, Difficulty, GameState, Player } from './types.js';
 
-const PASSIVE_PERMS: readonly CardKind[] = ['axe', 'fishing_rod', 'canteen', 'crystal_ball', 'club'];
+const PASSIVE_PERMS: readonly CardKind[] = ['axe', 'fishing_rod', 'canteen', 'crystal_ball', 'club', 'duck_float'];
+
+function cardValue(kind: CardKind): number {
+  if (kind === 'junk' || kind === 'diet_magazine') return 0;
+  if (['gun', 'axe', 'fishing_rod', 'duck_float', 'canteen', 'coconut', 'sardine_can'].includes(kind)) return 5;
+  if (['bullet', 'hollow_bullet', 'water_bottle', 'sandwich', 'tin_sheet', 'concave_plate'].includes(kind)) return 3;
+  return 2;
+}
+/** 自分の候補だけを評価し、他者の非公開手札は読まない。 */
+export function aiCardDecision(s: GameState): string | undefined {
+  const d = s.pendingCard;
+  if (!d) return;
+  if (d.kind === 'tie') return d.targetIds?.find((id) => id !== d.playerId) ?? d.targetIds?.[0];
+  const cards = d.kind === 'search' ? d.cards : s.players.find((p) => p.id === d.playerId)?.hand;
+  return [...(cards ?? [])].sort((a, b) => (d.kind === 'search' ? -1 : 1) * (cardValue(a.kind) - cardValue(b.kind)))[0]
+    ?.id;
+}
+export function aiExtraPlays(
+  s: GameState,
+  p: Player,
+): Array<{ cardId: string; targetId?: string; options?: CardOptions }> {
+  const uses: Array<{ cardId: string; targetId?: string; options?: CardOptions }> = [];
+  for (const c of p.hand) {
+    if (
+      ['coffee', 'wooden_plank', 'wooden_crate'].includes(c.kind) ||
+      (c.kind === 'shaman_kit' && s.currentPrecip === 0) ||
+      (c.kind === 'cat' && s.food === 0) ||
+      (c.kind === 'fish_tank' && s.water === 0)
+    )
+      uses.push({ cardId: c.id });
+    if (c.kind === 'food_mill' && s.food >= aliveCount(s) + 2 && s.water < aliveCount(s)) uses.push({ cardId: c.id });
+    if (c.kind === 'instant_noodles' && s.water >= aliveCount(s) + 2 && s.food < aliveCount(s))
+      uses.push({ cardId: c.id });
+    if (c.kind === 'pendulum' || c.kind === 'whip') {
+      const target = s.players.find((q) => q.alive && !q.escaped && !q.sick && !q.resting && q.id !== p.id);
+      if (target)
+        uses.push({
+          cardId: c.id,
+          targetId: target.id,
+          options: {
+            action: s.food < aliveCount(s) ? 'fish' : s.water < aliveCount(s) && s.currentPrecip > 0 ? 'water' : 'wood',
+            woodPush: 1,
+          },
+        });
+    }
+    if (c.kind === 'metal_detector') uses.push({ cardId: c.id });
+    if (c.kind === 'taser') {
+      const target = s.players.find((q) => q.alive && !q.escaped && q.id !== p.id && q.equipment?.length);
+      if (target) uses.push({ cardId: c.id, targetId: target.id, options: { targetCardId: target.equipment![0].id } });
+    }
+  }
+  return uses;
+}
 /** 受動の永続は所持しているだけでは無効になったので、CPUは手番で即「発動」する。 */
 export function aiPermanentPlays(p: Player): string[] {
   return p.hand.filter((c) => PASSIVE_PERMS.includes(c.kind) && !p.revealed.includes(c.kind)).map((c) => c.id);
@@ -22,7 +74,7 @@ export function aiBeforeAction(s: GameState, p: Player): string[] {
 
 /** 投票で「自分が追放されそう」なCPUがほら貝を吹いて無効化する番。返り値は {playerId, cardId} の配列。 */
 export function aiConchPlays(s: GameState): Array<{ playerId: string; cardId: string }> {
-  if (s.phase !== 'vote') return [];
+  if (s.phase !== 'vote' || s.voteImmuneId) return [];
   const alive = s.players.filter((p) => p.alive && !p.escaped);
   // 簡易集計（棍棒重みは無視した概算で十分）
   const tally = new Map<string, number>();
@@ -41,9 +93,10 @@ export function aiConchPlays(s: GameState): Array<{ playerId: string; cardId: st
   const isAuto = victim.isBot || !victim.connected;
   if (!isAuto || victim.voteSafe) return [];
   const reason = s.voteReason;
-  const hasSave = reason === 'water'
-    ? victim.hand.some((c) => c.kind === 'coconut' || c.kind === 'water_bottle' || c.kind === 'dirty_water')
-    : victim.hand.some((c) => c.kind === 'sardine_can' || c.kind === 'sandwich' || c.kind === 'rotten_fish');
+  const hasSave =
+    reason === 'water'
+      ? victim.hand.some((c) => c.kind === 'coconut' || c.kind === 'water_bottle' || c.kind === 'dirty_water')
+      : victim.hand.some((c) => c.kind === 'sardine_can' || c.kind === 'sandwich' || c.kind === 'rotten_fish');
   if (hasSave) return [];
   const conch = victim.hand.find((c) => c.kind === 'conch');
   return conch ? [{ playerId: victim.id, cardId: conch.id }] : [];
@@ -128,7 +181,7 @@ export function aiSurvivalPlays(s: GameState, p: Player): string[] {
 
 export function aiVote(s: GameState, p: Player, rng: Rng): string | null {
   const me = p;
-  const cands = s.players.filter((x) => x.alive && !x.escaped && x.id !== me.id);
+  const cands = s.players.filter((x) => x.alive && !x.escaped && x.id !== me.id && x.id !== s.voteImmuneId);
   if (cands.length === 0) return null;
   const per = persona(me);
   const { voteSmart } = difficultyParams(diff(me, s));
@@ -161,11 +214,7 @@ export function aiChatLine(p: Player, rng: Rng): string | null {
  * 無料（APIキー無し）でも交渉感を出すための、状況依存スクリプトのセリフ＋投票意図。
  * 手札・性格・脅し（銃）・取引・なすりつけ・強行を、相手の名前を入れて述べる。
  */
-export function scriptedNegotiation(
-  s: GameState,
-  me: Player,
-  rng: Rng,
-): { say: string; voteId: string | null } {
+export function scriptedNegotiation(s: GameState, me: Player, rng: Rng): { say: string; voteId: string | null } {
   const others = s.players.filter((p) => p.alive && !p.escaped && p.id !== me.id);
   if (others.length === 0) return { say: '…', voteId: null };
   const per = persona(me);
@@ -181,16 +230,32 @@ export function scriptedNegotiation(
   }
   switch (per) {
     case 'cooperative':
-      lines.push(`${target.name}、ほとんど何も出してないだろ？`, `公平にいこう。${target.name}が抜けるべきだ。`, `${poor.name}、水を出すなら庇うよ。`);
+      lines.push(
+        `${target.name}、ほとんど何も出してないだろ？`,
+        `公平にいこう。${target.name}が抜けるべきだ。`,
+        `${poor.name}、水を出すなら庇うよ。`,
+      );
       break;
     case 'hoarder':
-      lines.push(`私は出した方だ、${rich.name}こそ溜め込んでる。`, `疑うなら${rich.name}を調べろよ。`, `なんで僕なんだ、${target.name}だろ普通。`);
+      lines.push(
+        `私は出した方だ、${rich.name}こそ溜め込んでる。`,
+        `疑うなら${rich.name}を調べろよ。`,
+        `なんで僕なんだ、${target.name}だろ普通。`,
+      );
       break;
     case 'sniper':
-      lines.push(`${rich.name}、手札を抱えすぎだ。消えてもらう。`, `誰が邪魔か、もう分かってる。${rich.name}だ。`, `俺は${rich.name}に入れる。文句あるか？`);
+      lines.push(
+        `${rich.name}、手札を抱えすぎだ。消えてもらう。`,
+        `誰が邪魔か、もう分かってる。${rich.name}だ。`,
+        `俺は${rich.name}に入れる。文句あるか？`,
+      );
       break;
     case 'coward':
-      lines.push(`お、俺じゃない！${target.name}が怪しい！`, `みんなが${target.name}なら、俺もそれでいい…`, `頼む、${poor.name}…君が出してくれよ。`);
+      lines.push(
+        `お、俺じゃない！${target.name}が怪しい！`,
+        `みんなが${target.name}なら、俺もそれでいい…`,
+        `頼む、${poor.name}…君が出してくれよ。`,
+      );
       break;
   }
   // たまに取引・強行

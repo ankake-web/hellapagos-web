@@ -1,5 +1,6 @@
 import {
   BAG,
+  CARD_INFO,
   DEFAULT_CONFIG,
   MAX_SEATS,
   RAFT_LOOP,
@@ -18,6 +19,7 @@ import type {
   BotPersona,
   Card,
   CardKind,
+  CardOptions,
   GainKind,
   GameConfig,
   GameState,
@@ -38,7 +40,7 @@ function find(s: GameState, id: string): Player | undefined {
   return s.players.find((p) => p.id === id);
 }
 function hasCard(p: Player, kind: CardKind): boolean {
-  return p.hand.some((c) => c.kind === kind);
+  return [...p.hand, ...(p.equipment ?? [])].some((c) => c.kind === kind);
 }
 /** 永続カードは「使用(発動)」して revealed に入って初めて効果を持つ（所持だけでは無効）。 */
 export function hasPermanent(p: Player, kind: CardKind): boolean {
@@ -46,7 +48,10 @@ export function hasPermanent(p: Player, kind: CardKind): boolean {
 }
 /** 永続カードを「使用済み（公開）」として記録（銃など、手札に残すもの用）。 */
 function reveal(p: Player, kind: CardKind): void {
-  if (hasCard(p, kind) && !p.revealed.includes(kind)) p.revealed.push(kind);
+  if (!hasCard(p, kind)) return;
+  const i = p.hand.findIndex((c) => c.kind === kind);
+  if (i >= 0) (p.equipment ??= []).push(...p.hand.splice(i, 1));
+  if (!p.revealed.includes(kind)) p.revealed.push(kind);
 }
 /** 資源・カード獲得を演出用に記録（飛んでいくトークン）。 */
 function recordGain(s: GameState, playerId: string, kind: GainKind, amount: number): void {
@@ -106,6 +111,7 @@ function newPlayer(p: NewPlayer): Player {
     sick: false,
     resting: false,
     hand: [],
+    equipment: [],
     acted: false,
     revealed: [],
     botPersona: p.botPersona,
@@ -208,14 +214,18 @@ function beginRound(d: GameState): GameState {
       p.resting = true;
       p.sick = false;
     }
+    p.extraActions = 0;
     p.acted = false;
     p.vote = undefined;
     p.escapeChoice = undefined;
     p.matchSafe = false; // マッチの効果はラウンドをまたがない
   }
+  d.voteImmuneId = undefined;
+  d.privatePreview = undefined;
+  d.bodiesAvailable = 0;
   d.fruitUsed = false;
   d.lastWoodGain = undefined;
-  d.roundDeaths = 0; // 「そのラウンドの脱落者数」をリセット（死体 bodiesAvailable は食べるまで残す）
+  d.roundDeaths = 0; // 死体の利用は同じラウンドだけ
   d.lastPeek = undefined;
   // 天候公開
   const card = d.weatherDeck.shift();
@@ -259,23 +269,33 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
   if (currentActorId(s) !== playerId) return s;
   const d = clone(s);
   const p = find(d, playerId)!;
+  if (s.pendingCard) return s;
+  performAction(d, p, action, woodPush);
+  if ((p.extraActions ?? 0) > 0) p.extraActions!--;
+  else {
+    p.acted = true;
+    d.currentActorIndex = nextAliveIndex(d, d.currentActorIndex + 1);
+  }
+  if (d.pendingCard) {
+    d.pendingCard.advanceTurn = true;
+    return d;
+  }
+  return prepareActor(d);
+}
+
+function performAction(d: GameState, p: Player, action: ActionType, woodPush = 0): void {
+  const playerId = p.id;
   const rng = new Rng(d.rngState);
   d.lastWoodGain = undefined;
 
   switch (action) {
     case 'fish': {
-      const ball = drawBall(rng);
-      if (isSnake(ball)) {
-        // 釣りの黒玉は「不漁」。噛まれて病気になるのは木集めのみ。
-        d.lastDraw = { playerId, balls: [ball], action };
-        pushLog(d, `${p.name} は釣り：不漁で1匹も釣れなかった。`, 'bad', playerId);
-      } else {
-        const gain = ball.fish * (hasPermanent(p, 'fishing_rod') ? 2 : 1);
-        d.food = clampSupply(d.food + gain);
-        d.lastDraw = { playerId, balls: [ball], action };
-        recordGain(d, playerId, 'food', gain);
-        pushLog(d, `${p.name} は釣り：魚 ${ball.fish}${hasPermanent(p, 'fishing_rod') ? '×2' : ''} で食料 +${gain}。`, 'good', playerId);
-      }
+      const balls = hasPermanent(p, 'fishing_rod') ? rng.shuffle(BAG).slice(0, 2) : [drawBall(rng)];
+      const gain = balls.reduce((n, b) => n + b.fish, 0);
+      d.food = clampSupply(d.food + gain);
+      d.lastDraw = { playerId, balls, action };
+      recordGain(d, playerId, 'food', gain);
+      pushLog(d, `${p.name} は釣り：魚 ${balls.map((b) => b.fish).join('＋')} で食料 +${gain}。`, 'good', playerId);
       break;
     }
     case 'water': {
@@ -286,7 +306,12 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
       } else {
         d.water = clampSupply(d.water + gain);
         recordGain(d, playerId, 'water', gain);
-        pushLog(d, `${p.name} は水汲み：水 +${gain}（降水量${d.currentPrecip}${mult > 1 ? '×2' : ''}）。`, 'good', playerId);
+        pushLog(
+          d,
+          `${p.name} は水汲み：水 +${gain}（降水量${d.currentPrecip}${mult > 1 ? '×2' : ''}）。`,
+          'good',
+          playerId,
+        );
       }
       break;
     }
@@ -296,11 +321,16 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
       let gained = base;
       const push = Math.max(0, Math.min(5, Math.floor(woodPush)));
       if (push > 0) {
-        const balls = Array.from({ length: push }, () => drawBall(rng));
+        const balls = rng.shuffle(BAG).slice(0, push);
         d.lastDraw = { playerId, balls, action };
         if (balls.some(isSnake)) {
           p.sick = true;
-          pushLog(d, `${p.name} は木集めで${push}本引いて🐍ヘビに噛まれた！追加分は失ったが確定分の木+${base}は確保（病気で次R休み）。`, 'snake', playerId);
+          pushLog(
+            d,
+            `${p.name} は木集めで${push}本引いて🐍ヘビに噛まれた！追加分は失ったが確定分の木+${base}は確保（病気で次R休み）。`,
+            'snake',
+            playerId,
+          );
         } else {
           addWood(d, push);
           gained += push;
@@ -315,6 +345,11 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
       break;
     }
     case 'search': {
+      if (hasPermanent(p, 'duck_float') && d.deck.length > 1) {
+        d.pendingCard = { kind: 'search', playerId, cards: d.deck.splice(0, 2) };
+        pushLog(d, `${p.name} は漂着物2枚から1枚を選んでいる。`, 'card', playerId);
+        break;
+      }
       const card = d.deck.shift();
       if (card) {
         p.hand.push(card);
@@ -327,10 +362,7 @@ export function takeAction(s: GameState, playerId: string, action: ActionType, w
     }
   }
 
-  p.acted = true;
   d.rngState = rng.state;
-  d.currentActorIndex = nextAliveIndex(d, d.currentActorIndex + 1);
-  return prepareActor(d);
 }
 
 // ===== 生存フェイズ =====
@@ -431,14 +463,19 @@ function startVote(d: GameState): GameState {
   return d;
 }
 export function castVote(s: GameState, playerId: string, targetId: string | null): GameState {
-  if (s.phase !== 'vote') return s;
+  if (s.phase !== 'vote' || s.pendingCard) return s;
   const d = clone(s);
   const voter = find(d, playerId);
   if (!voter || !voter.alive || voter.escaped || voter.sick) return s;
+  if (
+    hasPermanent(voter, 'crystal_ball') &&
+    eligibleVoters(d).some((q) => q.id !== voter.id && !hasPermanent(q, 'crystal_ball') && q.vote === undefined)
+  )
+    return s;
   let valid: string | null = null;
   if (targetId) {
     const t = find(d, targetId);
-    if (t && t.alive && !t.escaped && t.id !== playerId) valid = targetId;
+    if (t && t.alive && !t.escaped && t.id !== playerId && t.id !== d.voteImmuneId) valid = targetId;
   }
   voter.vote = valid;
   return d;
@@ -452,10 +489,11 @@ export function resolveVote(s: GameState): GameState {
   const d = clone(s);
   // 集計（棍棒を装備していれば自分の票は CLUB_VOTE_WEIGHT 票として数える）
   const tally = new Map<string, number>();
-  for (const v of eligibleVoters(d)) if (v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + (hasPermanent(v, 'club') ? CLUB_VOTE_WEIGHT : 1));
+  for (const v of eligibleVoters(d))
+    if (v.vote) tally.set(v.vote, (tally.get(v.vote) ?? 0) + (hasPermanent(v, 'club') ? CLUB_VOTE_WEIGHT : 1));
   for (const p of d.players) (p as { votesReceived?: number }).votesReceived = tally.get(p.id) ?? 0;
 
-  const candidates = alivePlayers(d);
+  const candidates = alivePlayers(d).filter((p) => p.id !== d.voteImmuneId);
   let max = -1;
   for (const p of candidates) max = Math.max(max, tally.get(p.id) ?? 0);
   let topped = candidates.filter((p) => (tally.get(p.id) ?? 0) === max && max > 0);
@@ -464,13 +502,14 @@ export function resolveVote(s: GameState): GameState {
   if (topped.length === 1) {
     victim = topped[0];
   } else {
-    // 同票/無投票 → 親が裁定（親が脱落していれば右隣の生存者）
     const parent = d.players[nextAliveIndex(d, d.firstPlayerIndex)];
-    const pool = topped.length > 0 ? topped : candidates.filter((p) => p.id !== parent?.id);
-    if (parent?.vote && pool.some((p) => p.id === parent.vote)) {
-      victim = pool.find((p) => p.id === parent.vote);
-    } else {
-      victim = [...pool].sort((a, b) => a.hand.length - b.hand.length || d.players.indexOf(a) - d.players.indexOf(b))[0];
+    const pool = topped.length ? topped : candidates;
+    if (d.tieChoiceId && pool.some((p) => p.id === d.tieChoiceId)) {
+      victim = pool.find((p) => p.id === d.tieChoiceId);
+      d.tieChoiceId = undefined;
+    } else if (parent && pool.length) {
+      d.pendingCard = { kind: 'tie', playerId: parent.id, targetIds: pool.map((p) => p.id) };
+      return d;
     }
   }
   if (!victim) {
@@ -526,6 +565,11 @@ function resourceFoodCard(p: Player): CardKind | undefined {
 function removeOneCard(p: Player, kind: CardKind): void {
   const i = p.hand.findIndex((c) => c.kind === kind);
   if (i >= 0) p.hand.splice(i, 1);
+  else {
+    const j = p.equipment?.findIndex((c) => c.kind === kind) ?? -1;
+    if (j >= 0) p.equipment!.splice(j, 1);
+  }
+  if (!hasCard(p, kind)) p.revealed = p.revealed.filter((k) => k !== kind);
 }
 
 /** 汚れた水/腐った魚の「病気」を付与する。ただしマッチを使っていれば1回だけ無効化する。 */
@@ -601,7 +645,9 @@ function killPlayer(d: GameState, victim: Player): void {
   const left = findNeighbor(d, idx, -1);
   const right = findNeighbor(d, idx, +1);
   const targets = [right, left].filter(Boolean) as Player[];
-  const hand = victim.hand;
+  const hand = [...victim.hand, ...(victim.equipment ?? []).filter((c) => c.kind === 'gun' || c.kind === 'duck_float')];
+  victim.equipment = [];
+  victim.revealed = [];
   victim.hand = [];
   if (targets.length === 0) return;
   hand.forEach((c, i) => targets[i % targets.length].hand.push(c));
@@ -616,19 +662,28 @@ function findNeighbor(d: GameState, idx: number, dir: number): Player | undefine
 }
 
 // ===== カードプレイ（手番＋生存/投票ウィンドウ） =====
-export function playCard(s: GameState, playerId: string, cardId: string, targetId?: string | null): GameState {
+export function playCard(
+  s: GameState,
+  playerId: string,
+  cardId: string,
+  targetId?: string | null,
+  options: CardOptions = {},
+): GameState {
+  if (!['action', 'survival', 'vote', 'escape'].includes(s.phase) || s.pendingCard) return s;
   const p0 = find(s, playerId);
   if (!p0 || !p0.alive || p0.escaped || p0.resting) return s;
-  const card = p0.hand.find((c) => c.id === cardId);
+  const card = [...p0.hand, ...(p0.equipment ?? [])].find((c) => c.id === cardId);
   if (!card) return s;
   // 病気中はカード不可（自己救済は自動処理のため除外）
   if (p0.sick && card.kind !== 'serum') return s;
   // 弾は単体では使えない（銃と併用）。無用品は一切使えない（手札に残り、何を持つか怪しまれる）。
-  if (card.kind === 'bullet' || card.kind === 'junk') return s;
+  if (card.kind === 'bullet' || card.kind === 'hollow_bullet' || CARD_INFO[card.kind].cat === 'junk') return s;
 
   const d = clone(s);
   const p = find(d, playerId)!;
-  const c = p.hand.find((x) => x.id === cardId)!;
+  const c = [...p.hand, ...(p.equipment ?? [])].find((x) => x.id === cardId)!;
+  const extra = playExtra(d, p, c, targetId, options);
+  if (extra !== undefined) return extra ? d : s;
 
   switch (c.kind) {
     case 'water_bottle':
@@ -662,12 +717,12 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
     case 'fishing_rod':
     case 'axe':
     case 'crystal_ball':
-    case 'club': {
+    case 'club':
+    case 'duck_float': {
       // 受動の永続：使って初めて効果が発動し、公開される（以後ずっと有効）。
       if (d.phase !== 'action') return s;
       if (p.revealed.includes(c.kind)) return s;
-      p.revealed.push(c.kind);
-      removeOneCard(p, c.kind);
+      reveal(p, c.kind);
       pushLog(d, `${p.name} は ${permName(c.kind)} を使った（以後ずっと効果が続く）。`, 'card', playerId);
       break;
     }
@@ -715,41 +770,27 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
     }
     case 'alarm_clock': {
       if (d.phase !== 'action') return s;
-      if (targetId && find(d, targetId)) d.nextParentId = targetId;
+      if (!targetId || !find(d, targetId)?.alive || find(d, targetId)?.escaped) return s;
+      d.nextParentId = targetId;
       removeOneCard(p, 'alarm_clock');
       pushLog(d, `${p.name} は目覚まし時計で次の親を指名した。`, 'card', playerId);
       break;
     }
     case 'gun': {
-      // 弾が必要
-      if (!hasCard(p, 'bullet')) return s;
       const t = targetId ? find(d, targetId) : undefined;
-      if (!t || !t.alive || t.escaped || t.id === playerId) return s;
-      removeOneCard(p, 'bullet');
+      const ammo = options.useHollowBullet ? 'hollow_bullet' : hasCard(p, 'bullet') ? 'bullet' : 'hollow_bullet';
+      if (!t || !t.alive || t.escaped || t.id === p.id || !hasCard(p, ammo)) return s;
+      const beforeCount = aliveCount(d);
+      removeOneCard(p, ammo);
       reveal(p, 'gun');
-      // トタン板：撃たれた側が持っていれば、自動で1回だけ弾を防ぐ（板は消費）
-      if (hasCard(t, 'tin_sheet')) {
-        removeOneCard(t, 'tin_sheet');
-        pushLog(d, `${p.name} は ${t.name} を撃ったが、トタン板で防がれた！（弾を消費）`, 'card', t.id);
-        break;
-      }
-      // 撃った側が被害者の手札を得る
-      for (const card2 of t.hand) p.hand.push(card2);
-      t.hand = [];
-      t.alive = false;
-      d.roundDeaths = (d.roundDeaths ?? 0) + 1;
-      d.bodiesAvailable = (d.bodiesAvailable ?? 0) + 1;
-      pushLog(d, `${p.name} は ${t.name} を銃で撃った！所持品を奪った。`, 'death', t.id);
-      // 投票/生存中の射殺で人数が減る → 進行を再評価
-      if (d.phase === 'vote' && d.pendingEliminations > 0) {
-        d.pendingEliminations = Math.max(0, d.pendingEliminations - 1);
-        if (aliveCount(d) <= 0) {
-          d.phase = 'gameover';
-          return d;
-        }
+      shoot(d, p, t, ammo === 'hollow_bullet');
+      if (d.phase === 'vote' && aliveCount(d) < beforeCount) {
+        d.pendingEliminations = Math.max(0, d.pendingEliminations - (beforeCount - aliveCount(d)));
         if (d.pendingEliminations === 0) return afterVoteBatch(d);
         return startVote(d);
       }
+      if (aliveCount(d) === 0) d.phase = 'gameover';
+      else if (d.phase === 'action' && !find(d, currentActorId(d) ?? '')?.alive) return prepareActor(d);
       break;
     }
     case 'matches': {
@@ -785,23 +826,213 @@ export function playCard(s: GameState, playerId: string, cardId: string, targetI
       break;
     }
     case 'conch': {
-      // ほら貝：進行中の追放(投票)を1回無効化する。誰も脱落させずに次へ。
-      if (d.phase !== 'vote') return s;
+      if (d.voteImmuneId) return s;
       removeOneCard(p, 'conch');
-      pushLog(d, `${p.name} がほら貝を吹き鳴らした！この追放は無効になった。`, 'card', playerId);
-      d.pendingEliminations = Math.max(0, d.pendingEliminations - 1);
-      for (const q of d.players) {
-        q.vote = undefined;
-        q.voteSafe = false;
-        (q as { votesReceived?: number }).votesReceived = undefined;
-      }
-      if (d.pendingEliminations <= 0) return afterVoteBatch(d);
-      return startVote(d);
+      d.firstPlayerIndex = d.players.indexOf(p);
+      d.voteImmuneId = p.id;
+      for (const q of d.players) if (q.vote === p.id) q.vote = undefined;
+      pushLog(d, `${p.name} がほら貝を吹き、今ラウンドの親になった（投票対象外）。`, 'card', p.id);
+      break;
     }
     default:
       return s;
   }
   return d;
+}
+
+export function resolveCardDecision(s: GameState, playerId: string, choiceId: string): GameState {
+  const pending = s.pendingCard;
+  if (!pending || pending.playerId !== playerId) return s;
+  const d = clone(s),
+    p = find(d, playerId)!;
+  if (pending.kind === 'tie') {
+    if (!pending.targetIds?.includes(choiceId)) return s;
+    d.pendingCard = undefined;
+    d.tieChoiceId = choiceId;
+    pushLog(d, `${p.name} が同票を裁定した。`, 'info', p.id);
+    return resolveVote(d);
+  }
+  if (pending.kind === 'search') {
+    const card = pending.cards?.find((c) => c.id === choiceId);
+    if (!card) return s;
+    p.hand.push(card);
+    d.pendingCard = undefined;
+    recordGain(d, p.id, 'card', 1);
+    pushLog(d, `${p.name} は漂着物を1枚選び、残りを捨てた。`, 'card', p.id);
+    return pending.advanceTurn ? prepareActor(d) : d;
+  }
+  const card = p.hand.find((c) => c.id === choiceId);
+  if (!card) return s;
+  p.hand = p.hand.filter((c) => c.id !== choiceId);
+  const neighbor = findNeighbor(d, d.players.indexOf(p), -1);
+  if (neighbor) neighbor.hand.push(card);
+  pushLog(d, `${p.name} は左隣の ${neighbor?.name ?? '生存者'} に手札を1枚渡した。`, 'card', p.id);
+  const queue = (pending.queue ?? []).filter((id) => {
+    const q = find(d, id);
+    return q?.alive && !q.escaped && q.hand.length;
+  });
+  d.pendingCard = queue.length ? { kind: 'rum', playerId: queue[0], queue: queue.slice(1) } : undefined;
+  return d;
+}
+
+function shoot(d: GameState, shooter: Player, target: Player, hollow: boolean): void {
+  if (!hollow && hasCard(target, 'concave_plate')) {
+    removeOneCard(target, 'concave_plate');
+    pushLog(d, `${target.name} は反射板で弾を左隣へ跳ね返した！`, 'card', target.id);
+    const next = findNeighbor(d, d.players.indexOf(target), -1);
+    if (next) shoot(d, shooter, next, false);
+    return;
+  }
+  if (!hollow && hasCard(target, 'tin_sheet')) {
+    removeOneCard(target, 'tin_sheet');
+    pushLog(d, `${target.name} はトタン板で弾を防いだ。`, 'card', target.id);
+    return;
+  }
+  const loot = [...target.hand, ...(target.equipment ?? []).filter((c) => c.kind === 'gun' || c.kind === 'duck_float')];
+  target.hand = [];
+  target.equipment = [];
+  target.revealed = [];
+  target.alive = false;
+  if (shooter.id !== target.id && shooter.alive) shooter.hand.push(...loot);
+  else findNeighbor(d, d.players.indexOf(target), 1)?.hand.push(...loot);
+  d.roundDeaths = (d.roundDeaths ?? 0) + 1;
+  d.bodiesAvailable = (d.bodiesAvailable ?? 0) + 1;
+  pushLog(d, `${target.name} は${hollow ? '防具を貫く弾' : '銃弾'}に倒れた。`, 'death', target.id);
+}
+
+/** undefined=従来のカード、false=条件不成立、true=適用済み。 */
+function playExtra(
+  d: GameState,
+  p: Player,
+  c: Card,
+  targetId: string | null | undefined,
+  o: CardOptions,
+): boolean | undefined {
+  const t = targetId ? find(d, targetId) : undefined;
+  const other = t && t.id !== p.id && t.alive && !t.escaped ? t : undefined;
+  const ownTurn = d.phase === 'action' && currentActorId(d) === p.id;
+  const spend = () => {
+    removeOneCard(p, c.kind);
+    pushLog(d, `${p.name} は ${CARD_INFO[c.kind].name} を使った。`, 'card', p.id);
+  };
+  switch (c.kind) {
+    case 'coffee':
+      if (!ownTurn) return false;
+      p.extraActions = (p.extraActions ?? 0) + 1;
+      spend();
+      return true;
+    case 'barometer':
+      if (!ownTurn) return false;
+      d.privatePreview = { byId: p.id, title: '次の天候（左から順）', weather: d.weatherDeck.slice(0, 2) };
+      spend();
+      return true;
+    case 'flashlight':
+      if (!ownTurn) return false;
+      d.privatePreview = { byId: p.id, title: '難破船の山札（左から順）', cards: d.deck.slice(0, 3) };
+      spend();
+      return true;
+    case 'wooden_plank':
+      if (d.raftSeats >= MAX_SEATS) return false;
+      d.raftSeats++;
+      spend();
+      return true;
+    case 'wooden_crate':
+      addWood(d, 2);
+      spend();
+      return true;
+    case 'food_mill':
+      if (d.food < 2) return false;
+      d.food -= 2;
+      d.water = clampSupply(d.water + 2);
+      spend();
+      return true;
+    case 'instant_noodles':
+      if (d.water < 2) return false;
+      d.water -= 2;
+      d.food = clampSupply(d.food + 2);
+      spend();
+      return true;
+    case 'fish_tank':
+      if (d.water !== 0) return false;
+      d.water = 1;
+      spend();
+      return true;
+    case 'cat':
+      if (d.food !== 0) return false;
+      d.food = 2;
+      spend();
+      return true;
+    case 'shaman_kit':
+      if (d.currentPrecip !== 0) return false;
+      d.currentPrecip = 1;
+      spend();
+      return true;
+    case 'metal_detector': {
+      if (!ownTurn) return false;
+      const found = d.deck
+        .splice(0, 4)
+        .filter((x) => ['bullet', 'hollow_bullet', 'tin_sheet', 'concave_plate'].includes(x.kind));
+      p.hand.push(...found);
+      spend();
+      d.privatePreview = { byId: p.id, title: '金属探知機で回収したカード', cards: found };
+      return true;
+    }
+    case 'pendulum':
+    case 'whip': {
+      if (!ownTurn || !other || other.resting || other.sick) return false;
+      const action = c.kind === 'whip' ? 'wood' : o.action;
+      if (!action || !['fish', 'water', 'wood', 'search'].includes(action)) return false;
+      spend();
+      performAction(d, other, action, o.woodPush ?? 0);
+      return true;
+    }
+    case 'taser': {
+      if (!ownTurn || !other) return false;
+      const item = other.equipment?.find((x) => x.id === o.targetCardId);
+      if (!item) return false;
+      other.equipment = other.equipment!.filter((x) => x.id !== item.id);
+      if (!hasCard(other, item.kind)) other.revealed = other.revealed.filter((k) => k !== item.kind);
+      (p.equipment ??= []).push(item);
+      if (!p.revealed.includes(item.kind)) p.revealed.push(item.kind);
+      spend();
+      return true;
+    }
+    case 'whetstone': {
+      if (!ownTurn || !other || !hasCard(p, 'axe')) return false;
+      const i = d.players.indexOf(p);
+      if (![findNeighbor(d, i, -1)?.id, findNeighbor(d, i, 1)?.id].includes(other.id)) return false;
+      spend();
+      removeOneCard(p, 'axe');
+      const loot = [
+        ...other.hand,
+        ...(other.equipment ?? []).filter((x) => x.kind === 'gun' || x.kind === 'duck_float'),
+      ];
+      other.hand = [];
+      other.equipment = [];
+      other.revealed = [];
+      other.alive = false;
+      p.hand.push(...loot);
+      d.roundDeaths = (d.roundDeaths ?? 0) + 1;
+      d.bodiesAvailable = (d.bodiesAvailable ?? 0) + 1;
+      pushLog(d, `${p.name} は研いだ斧で ${other.name} を倒し、所持品を奪った。`, 'death', other.id);
+      return true;
+    }
+    case 'rum': {
+      if (!ownTurn) return false;
+      spend();
+      const queue = Array.from(
+        { length: d.players.length },
+        (_, i) => d.players[(d.firstPlayerIndex + i) % d.players.length],
+      )
+        .filter((q) => q.alive && !q.escaped)
+        .map((q) => q.id);
+      while (queue.length && !find(d, queue[0])!.hand.length) queue.shift();
+      if (queue.length) d.pendingCard = { kind: 'rum', playerId: queue[0], queue: queue.slice(1) };
+      return true;
+    }
+    default:
+      return undefined;
+  }
 }
 
 function cardName(kind: CardKind): string {
@@ -817,14 +1048,7 @@ function cardName(kind: CardKind): string {
   return map[kind] ?? kind;
 }
 function permName(kind: CardKind): string {
-  const map: Partial<Record<CardKind, string>> = {
-    canteen: '水筒',
-    fishing_rod: '釣り竿',
-    axe: '斧',
-    crystal_ball: '水晶玉',
-    gun: '銃',
-  };
-  return map[kind] ?? kind;
+  return CARD_INFO[kind].name;
 }
 
 // ===== ラウンド終了・脱出 =====
@@ -898,8 +1122,9 @@ function doEscape(d: GameState, survivors: Player[]): GameState {
 }
 
 // ===== サーバ進行用 =====
-export type AwaitKind = 'action' | 'survival' | 'vote' | 'escape' | null;
+export type AwaitKind = 'card' | 'action' | 'survival' | 'vote' | 'escape' | null;
 export function awaiting(s: GameState): AwaitKind {
+  if (s.pendingCard) return 'card';
   if (s.phase === 'action') return 'action';
   if (s.phase === 'survival') return 'survival';
   if (s.phase === 'vote') return 'vote';

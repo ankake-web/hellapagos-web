@@ -1,4 +1,4 @@
-import type { ActionType, Ack, Difficulty, LeaderboardEntry, Speed } from '@hellapagos/shared';
+import type { ActionType, CardOptions, Ack, Difficulty, LeaderboardEntry, Speed } from '@hellapagos/shared';
 import { socket, SERVER_URL } from './socket.js';
 import type { LocalRunner } from './game/localRunner.js';
 
@@ -22,9 +22,12 @@ type Config = { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; 
 
 export const api = {
   createRoom: (name: string) =>
-    local ? Promise.resolve<Ack>(local.createRoom(name)) : new Promise<Ack>((r) => socket.emit('room:create', { name }, r)),
+    local
+      ? Promise.resolve<Ack>(local.createRoom(name))
+      : new Promise<Ack>((r) => socket.emit('room:create', { name }, r)),
   joinRoom: (roomId: string, name: string) => new Promise<Ack>((r) => socket.emit('room:join', { roomId, name }, r)),
-  rejoin: (roomId: string, playerId: string) => new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId }, r)),
+  rejoin: (roomId: string, playerId: string) =>
+    new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId }, r)),
   leaveRoom: () => (local ? local.dispose() : socket.emit('room:leave')),
   addBot: () => (local ? local.addBot() : socket.emit('room:addBot')),
   removeBot: (botId: string) => (local ? local.removeBot(botId) : socket.emit('room:removeBot', { botId })),
@@ -32,8 +35,9 @@ export const api = {
   start: () => (local ? local.start() : socket.emit('game:start')),
   choose: (action: ActionType, woodPush = 0) =>
     local ? local.choose(action, woodPush) : socket.emit('action:choose', { action, woodPush }),
-  playCard: (cardId: string, targetId?: string | null) =>
-    local ? local.playCard(cardId, targetId) : socket.emit('card:play', { cardId, targetId }),
+  playCard: (cardId: string, targetId?: string | null, options?: CardOptions) =>
+    local ? local.playCard(cardId, targetId, options) : socket.emit('card:play', { cardId, targetId, options }),
+  resolveCard: (choiceId: string) => (local ? local.resolveCard(choiceId) : socket.emit('card:resolve', { choiceId })),
   survivalPass: () => (local ? local.survivalPass() : socket.emit('survival:pass')),
   vote: (targetId: string | null) => (local ? local.vote(targetId) : socket.emit('vote:cast', { targetId })),
   escapeVote: (leave: boolean) => (local ? local.escapeVote(leave) : socket.emit('escape:vote', { leave })),

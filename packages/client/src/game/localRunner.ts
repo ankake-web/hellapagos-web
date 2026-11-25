@@ -1,19 +1,26 @@
+import { actionResult, actionSpeech, presentationTiming, type TableMoment } from '@hellapagos/shared';
 // オフライン対戦のクライアント側ゲーム進行エンジン。
 // サーバ rooms.ts の drive() をブラウザ向けに移植（LLMは使わず scriptedNegotiation にフォールバック）。
 // 共有パッケージの純粋関数だけで完結するので、サーバ無しで CPU と1ゲーム遊べる。
 import {
   BOT_PERSONAS,
+  CARD_INFO,
   MAX_PLAYERS,
   MIN_PLAYERS,
   Rng,
   addPlayer,
   aiAction,
+  aiExtraPlays,
+  aiCardDecision,
+  resolveCardDecision,
+  type CardOptions,
   aiChatLine,
   aiBeforeAction,
   aiConchPlays,
   aiEscape,
   aiSurvivalPlays,
   aiVote,
+  hasPermanent,
   alivePlayers,
   awaiting,
   castVote,
@@ -108,6 +115,9 @@ export class LocalRunner {
   private botVoteIntent = new Map<string, string | null>();
   private negotiateUntil = 0;
   private holdUntil?: number;
+  private tableMoment?: TableMoment;
+  private presentedRound = 0;
+  private deadlineKey = '';
   private lastDramaId = -1;
   private disposed = false;
 
@@ -149,11 +159,45 @@ export class LocalRunner {
   }
   choose(action: ActionType, woodPush = 0): void {
     if (currentActorId(this.state) !== this.myId) return;
-    this.state = takeAction(this.state, this.myId, action, woodPush);
+    if (this.holdUntil && Date.now() < this.holdUntil) return;
+    const before = this.state;
+    this.state = takeAction(before, this.myId, action, woodPush);
+    if (this.state !== before) {
+      const until = Date.now() + presentationTiming(before.config.speed).result;
+      this.tableMoment = {
+        id: Date.now(),
+        stage: 'result',
+        playerId: this.myId,
+        action,
+        ...actionResult(before, this.state, this.myId, action),
+        until,
+      };
+      this.holdUntil = until;
+    }
     this.drive();
   }
-  playCard(cardId: string, targetId?: string | null): void {
-    this.state = playCard(this.state, this.myId, cardId, targetId ?? undefined);
+  resolveCard(choiceId: string): void {
+    this.state = resolveCardDecision(this.state, this.myId, choiceId);
+    this.drive();
+  }
+  playCard(cardId: string, targetId?: string | null, options?: CardOptions): void {
+    const before = this.state;
+    const owner = before.players.find((p) => p.id === this.myId);
+    const card = [...(owner?.hand ?? []), ...(owner?.equipment ?? [])].find((c) => c.id === cardId);
+    this.state = playCard(before, this.myId, cardId, targetId ?? undefined, options);
+    if (card && this.state !== before) {
+      const until = Date.now() + presentationTiming(before.config.speed).announce;
+      this.tableMoment = {
+        id: Date.now(),
+        stage: 'result',
+        playerId: this.myId,
+        cardKind: card.kind,
+        title: CARD_INFO[card.kind].name + 'を使った',
+        detail: this.state.log.at(-1)?.text ?? '',
+        until,
+      };
+      this.holdUntil = Math.max(this.holdUntil ?? 0, until);
+    }
     this.drive();
   }
   survivalPass(): void {
@@ -193,6 +237,7 @@ export class LocalRunner {
     if (this.disposed) return;
     const view = redactFor(this.state, this.myId, this.hostId);
     view.deadlineAt = this.deadlineAt;
+    view.tableMoment = this.tableMoment;
     this.cb.onState(view);
   }
   private postChat(name: string, text: string, isSpectator: boolean): void {
@@ -208,23 +253,66 @@ export class LocalRunner {
     while (guard++ < 4000) {
       const s = this.state;
       const aw = awaiting(s);
-      if (aw === null) {
-        this.clearTimers();
-        this.emit();
-        return;
+      const deadlineKey = [
+        s.round,
+        s.phase,
+        currentActorId(s),
+        s.voteReason,
+        s.pendingEliminations,
+        s.pendingCard?.playerId,
+        s.pendingCard?.kind,
+      ].join('|');
+      if (this.deadlineKey !== deadlineKey) {
+        if (this.deadline) clearTimeout(this.deadline);
+        this.deadline = undefined;
+        this.deadlineAt = undefined;
+        this.deadlineKey = deadlineKey;
       }
-
+      // 天候を見せ終えるまで、最初のCPUも裏で行動しない。
+      if (s.round > 0 && s.phase !== 'gameover' && this.presentedRound !== s.round) {
+        this.presentedRound = s.round;
+        this.holdUntil = Date.now() + presentationTiming(s.config.speed).round;
+      }
       const dId = latestDramaId(s);
-      if (dId > this.lastDramaId) {
+      if (dId > (this.lastDramaId ?? -1)) {
         this.lastDramaId = dId;
-        this.holdUntil = Date.now() + DRAMA_HOLD_MS;
+        this.holdUntil = Math.max(this.holdUntil ?? 0, Date.now() + DRAMA_HOLD_MS);
       }
       if (this.holdUntil && Date.now() < this.holdUntil) {
+        if (this.deadline) clearTimeout(this.deadline);
+        this.deadline = undefined;
+        this.deadlineAt = undefined;
         this.emit();
         this.scheduleHold(this.holdUntil - Date.now());
         return;
       }
+      this.holdUntil = undefined;
+      if (this.tableMoment?.stage === 'result') this.tableMoment = undefined;
+      if (aw === null) {
+        this.clearTimers();
 
+        this.emit();
+        return;
+      }
+
+      if (aw === 'card') {
+        const p = s.players.find((p) => p.id === s.pendingCard!.playerId);
+        if (!p) return;
+        const choose = () => {
+          const id = aiCardDecision(this.state);
+          if (id) this.state = resolveCardDecision(this.state, p.id, id);
+        };
+        if (this.isAuto(p)) {
+          if (!this.botTimer)
+            this.botTimer = setTimeout(() => {
+              this.botTimer = undefined;
+              choose();
+              this.drive();
+            }, presentationTiming(s.config.speed).announce);
+        } else this.ensureDeadline(choose);
+        this.emit();
+        return;
+      }
       if (aw === 'action') {
         const actorId = currentActorId(s);
         const actor = actorId ? s.players.find((p) => p.id === actorId) : undefined;
@@ -248,7 +336,8 @@ export class LocalRunner {
         if (this.survivalKey !== key) {
           this.survivalKey = key;
           for (const p of alivePlayers(s).filter((x) => this.isAuto(x))) {
-            for (const cardId of aiSurvivalPlays(this.state, this.live(p.id)!)) this.state = playCard(this.state, p.id, cardId);
+            for (const cardId of aiSurvivalPlays(this.state, this.live(p.id)!))
+              this.state = playCard(this.state, p.id, cardId);
             this.state = passSurvival(this.state, p.id);
           }
         }
@@ -273,7 +362,7 @@ export class LocalRunner {
           for (const p of alivePlayers(this.state).filter((x) => this.isAuto(x) && x.botPersona === 'sniper')) {
             if (awaiting(this.state) !== 'vote') break;
             const cur = this.live(p.id);
-            const gun = cur?.hand.find((c) => c.kind === 'gun');
+            const gun = [...(cur?.hand ?? []), ...(cur?.equipment ?? [])].find((c) => c.kind === 'gun');
             const bullet = cur?.hand.find((c) => c.kind === 'bullet');
             const r = rngFor(this.state, p.id.charCodeAt(0) + 9);
             if (gun && bullet && r.chance(0.6)) {
@@ -289,7 +378,9 @@ export class LocalRunner {
         }
         const past = !useNeg || Date.now() >= this.negotiateUntil;
         if (past) {
-          for (const p of alivePlayers(this.state).filter((x) => this.isAuto(x) && !x.sick && x.vote === undefined)) {
+          for (const p of alivePlayers(this.state)
+            .filter((x) => this.isAuto(x) && !x.sick && x.vote === undefined)
+            .sort((a, b) => Number(hasPermanent(a, 'crystal_ball')) - Number(hasPermanent(b, 'crystal_ball')))) {
             const intent = this.intentTarget(p.id);
             const r = rngFor(this.state, p.id.charCodeAt(p.id.length - 1));
             this.state = castVote(this.state, p.id, intent ?? aiVote(this.state, this.live(p.id)!, r));
@@ -308,7 +399,8 @@ export class LocalRunner {
         if (useNeg && !past) this.scheduleRedrive(this.negotiateUntil - Date.now());
         else
           this.ensureDeadline(() => {
-            for (const p of alivePlayers(this.state).filter((x) => !x.sick && x.vote === undefined)) this.state = castVote(this.state, p.id, null);
+            for (const p of alivePlayers(this.state).filter((x) => !x.sick && x.vote === undefined))
+              this.state = castVote(this.state, p.id, null);
           });
         this.emit();
         return;
@@ -323,7 +415,8 @@ export class LocalRunner {
           continue;
         }
         this.ensureDeadline(() => {
-          for (const p of alivePlayers(this.state).filter((x) => x.escapeChoice === undefined)) this.state = setEscapeChoice(this.state, p.id, false);
+          for (const p of alivePlayers(this.state).filter((x) => x.escapeChoice === undefined))
+            this.state = setEscapeChoice(this.state, p.id, false);
         });
         this.emit();
         return;
@@ -334,32 +427,77 @@ export class LocalRunner {
   }
 
   private scheduleBotAction(botId: string): void {
-    const [lo, hi] = thinkDelayRange(this.state.config.speed);
+    const timing = presentationTiming(this.state.config.speed);
     const r = rngFor(this.state, botId.charCodeAt(botId.length - 1));
-    const delay = lo + Math.floor(r.next() * (hi - lo));
+    const delay = timing.think[0] + Math.floor(r.next() * (timing.think[1] - timing.think[0]));
+    this.tableMoment = {
+      id: Date.now(),
+      stage: 'thinking',
+      playerId: botId,
+      title: '考え中',
+      detail: '島の様子を見ながら、行動を選んでいる。',
+      until: Date.now() + delay,
+    };
     this.botTimer = setTimeout(() => {
       this.botTimer = undefined;
       if (this.disposed) return;
       let bot = this.live(botId);
       if (!bot || currentActorId(this.state) !== botId) {
+        this.tableMoment = undefined;
         this.drive();
         return;
       }
-      // 手番前に使うカード（永続の発動・人肉BBQ等）を先に処理する
       for (const id of aiBeforeAction(this.state, bot)) this.state = playCard(this.state, botId, id);
+      for (const use of aiExtraPlays(this.state, this.live(botId)!)) {
+        this.state = playCard(this.state, botId, use.cardId, use.targetId, use.options);
+        if (this.state.pendingCard) {
+          this.tableMoment = undefined;
+          this.drive();
+          return;
+        }
+      }
       bot = this.live(botId)!;
       const decision = aiAction(this.state, bot, rngFor(this.state, botId.length));
-      if (bot.botPersona && r.chance(0.25)) {
-        const line = aiChatLine(bot, r);
-        if (line) this.postChat(bot.name, line, false);
-      }
-      this.state = takeAction(this.state, botId, decision.action, decision.woodPush);
-      const after = this.live(botId);
-      if (after?.sick) {
-        const serum = after.hand.find((c) => c.kind === 'serum');
-        if (serum) this.state = playCard(this.state, botId, serum.id);
-      }
-      this.drive();
+      const speech = actionSpeech(this.state, bot, decision.action, decision.woodPush);
+      this.tableMoment = {
+        id: Date.now(),
+        stage: 'announce',
+        playerId: botId,
+        action: decision.action,
+        title: speech,
+        detail: '行動を宣言',
+        until: Date.now() + timing.announce,
+      };
+      this.postChat(bot.name, speech, false);
+      this.emit();
+      this.botTimer = setTimeout(() => {
+        this.botTimer = undefined;
+        if (this.disposed) return;
+        if (currentActorId(this.state) !== botId) {
+          this.tableMoment = undefined;
+          this.drive();
+          return;
+        }
+        const before = this.state;
+        this.state = takeAction(before, botId, decision.action, decision.woodPush);
+        const after = this.live(botId);
+        if (after?.sick) {
+          const serum = after.hand.find((c) => c.kind === 'serum');
+          if (serum) this.state = playCard(this.state, botId, serum.id);
+        }
+        const result = actionResult(before, this.state, botId, decision.action);
+        const until = Date.now() + timing.result;
+        this.tableMoment = {
+          id: Date.now(),
+          stage: 'result',
+          playerId: botId,
+          action: decision.action,
+          ...result,
+          until,
+        };
+        this.holdUntil = until;
+        this.drive();
+      }, timing.announce);
     }, delay);
   }
 
@@ -374,17 +512,23 @@ export class LocalRunner {
   }
   private scheduleRedrive(ms: number): void {
     if (this.negTimer) return;
-    this.negTimer = setTimeout(() => {
-      this.negTimer = undefined;
-      if (!this.disposed) this.drive();
-    }, Math.max(300, ms));
+    this.negTimer = setTimeout(
+      () => {
+        this.negTimer = undefined;
+        if (!this.disposed) this.drive();
+      },
+      Math.max(300, ms),
+    );
   }
   private scheduleHold(ms: number): void {
     if (this.holdTimer) return;
-    this.holdTimer = setTimeout(() => {
-      this.holdTimer = undefined;
-      if (!this.disposed) this.drive();
-    }, Math.max(200, ms));
+    this.holdTimer = setTimeout(
+      () => {
+        this.holdTimer = undefined;
+        if (!this.disposed) this.drive();
+      },
+      Math.max(200, ms),
+    );
   }
   private startVoteNegotiation(key: string): void {
     const bots = alivePlayers(this.state).filter((p) => p.isBot && !p.sick);

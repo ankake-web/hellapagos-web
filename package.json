@@ -14,7 +14,8 @@
     "dev:client": "npm -w @hellapagos/client run dev",
     "build": "npm -w @hellapagos/client run build",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm -w @hellapagos/shared run test"
+    "test": "npm -w @hellapagos/shared run test && npm run test:progression",
+    "test:progression": "node --import tsx --test tests/progression.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

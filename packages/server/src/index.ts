@@ -6,6 +6,7 @@ import cors from 'cors';
 import express from 'express';
 import { Server } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@hellapagos/shared';
+import { RULESET_VERSION } from '@hellapagos/shared';
 import { topEntries } from './leaderboard.js';
 import { GameError, RoomManager } from './rooms.js';
 
@@ -15,7 +16,7 @@ const CLIENT_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../clie
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true, ruleset: RULESET_VERSION }));
 app.get('/leaderboard', (req, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
   res.json(topEntries(limit));
@@ -90,8 +91,9 @@ io.on('connection', (socket) => {
   socket.on('action:choose', ({ action, woodPush }) =>
     guard(socket.id, () => manager.submitAction(socket.id, action, woodPush ?? 0)),
   );
-  socket.on('card:play', ({ cardId, targetId }) =>
-    guard(socket.id, () => manager.submitCard(socket.id, cardId, targetId)),
+  socket.on('card:resolve', ({ choiceId }) => guard(socket.id, () => manager.resolveCard(socket.id, choiceId)));
+  socket.on('card:play', ({ cardId, targetId, options }) =>
+    guard(socket.id, () => manager.submitCard(socket.id, cardId, targetId, options)),
   );
   socket.on('survival:pass', () => guard(socket.id, () => manager.submitSurvivalPass(socket.id)));
   socket.on('vote:cast', ({ targetId }) => guard(socket.id, () => manager.submitVote(socket.id, targetId)));

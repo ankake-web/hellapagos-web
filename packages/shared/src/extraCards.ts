@@ -1,0 +1,33 @@
+// カードの効果は英語版基本/拡張カード面とGigamic公式補足で照合。
+export const EXTRA_CARD_INFO = {
+  coffee: { icon: '', name: 'コーヒー', desc: '自分の手番で行動をもう1回行える', cat: 'single' },
+  barometer: { icon: '', name: '気圧計', desc: '次の天候カード2枚を自分だけ確認する', cat: 'single' },
+  wooden_plank: { icon: '', name: '木の板', desc: 'いかだの席を1人分増やす', cat: 'single' },
+  food_mill: { icon: '', name: 'フードミル', desc: '食料2を水2に変える', cat: 'single' },
+  pendulum: { icon: '', name: '振り子', desc: '相手1人に、指定した行動をその場で行わせる', cat: 'single' },
+  flashlight: { icon: '', name: '懐中電灯', desc: '難破船の山札の上3枚を自分だけ確認する', cat: 'single' },
+  hollow_bullet: { icon: '', name: 'ダムダム弾', desc: '銃と併用する弾。トタン板や反射板を貫通する', cat: 'single' },
+  fish_tank: { icon: '', name: '金魚鉢', desc: '共有の水が0のとき、水1を得る', cat: 'resource' },
+  duck_float: {
+    icon: '',
+    name: 'アヒルの浮き輪',
+    desc: '装備後、探索で2枚引いて1枚を選ぶ。死亡時は回収される',
+    cat: 'permanent',
+  },
+  wooden_crate: { icon: '', name: '木箱', desc: '木材2をいかだに加える', cat: 'single' },
+  cat: { icon: '', name: 'ネコ', desc: '共有の食料が0のとき、食料2を得る', cat: 'resource' },
+  metal_detector: {
+    icon: '',
+    name: '金属探知機',
+    desc: '山札の上4枚から弾とトタン板を回収し、残りを捨てる',
+    cat: 'single',
+  },
+  whip: { icon: '', name: 'ムチ', desc: '相手1人に木集めをさせる。追加で引く玉の数は自分が決める', cat: 'single' },
+  shaman_kit: { icon: '', name: 'シャーマンキット', desc: 'このラウンドの降水量0を1に変える', cat: 'single' },
+  diet_magazine: { icon: '', name: 'ダイエット雑誌', desc: '効果のない持ち物。交換に使える', cat: 'junk' },
+  instant_noodles: { icon: '', name: 'インスタント麺', desc: '水2を食料2に変える', cat: 'single' },
+  whetstone: { icon: '', name: '砥石', desc: '斧と併用し、隣の生存者1人を倒す。斧も失う', cat: 'single' },
+  concave_plate: { icon: '', name: '反射板', desc: '通常弾を防ぎ、左隣の生存者へ跳ね返す', cat: 'single' },
+  rum: { icon: '', name: 'ラム酒', desc: '親から順に、手札1枚を左隣の生存者へ渡す', cat: 'single' },
+  taser: { icon: '', name: 'テーザー銃', desc: '相手が公開している装備を1枚選び、自分の装備にする', cat: 'single' },
+} as const;

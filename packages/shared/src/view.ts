@@ -1,5 +1,5 @@
 import { RESOURCE_CAP } from './content.js';
-import { aliveCount, canEscapeAll, currentActorId } from './engine.js';
+import { hasPermanent, aliveCount, canEscapeAll, currentActorId } from './engine.js';
 import type { GameState, PublicGameState, PublicPlayer } from './types.js';
 
 export function redactFor(s: GameState, viewerId: string, hostId: string): PublicGameState {
@@ -22,14 +22,31 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
       handCount: p.hand.length,
       permanents,
       votesReceived: p.votesReceived,
+      hasVoted: p.vote !== undefined,
       isYou,
       hand: isYou ? p.hand : undefined,
-      vote: isYou ? p.vote : undefined,
+      equipment: p.equipment,
+      vote:
+        isYou || (s.phase === 'vote' && s.players.some((q) => q.id === viewerId && hasPermanent(q, 'crystal_ball')))
+          ? p.vote
+          : undefined,
       persona: over && p.isBot ? p.botPersona : undefined,
     };
   });
 
   return {
+    pendingCard: s.pendingCard
+      ? {
+          ...s.pendingCard,
+          queue: undefined,
+          cards: s.pendingCard.playerId === viewerId ? s.pendingCard.cards : undefined,
+        }
+      : undefined,
+    privatePreview:
+      s.privatePreview?.byId === viewerId
+        ? { title: s.privatePreview.title, cards: s.privatePreview.cards, weather: s.privatePreview.weather }
+        : undefined,
+    wreckageRemaining: s.deck.length,
     phase: s.phase,
     round: s.round,
     players,
@@ -47,6 +64,7 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
     firstPlayerIndex: s.firstPlayerIndex,
     currentActorId: actorId,
     voteReason: s.voteReason,
+    voteImmuneId: s.voteImmuneId,
     pendingEliminations: s.pendingEliminations,
     canEscape: canEscapeAll(s),
     isYourTurn: actorId === viewerId,
@@ -59,6 +77,9 @@ export function redactFor(s: GameState, viewerId: string, hostId: string): Publi
     lastDraw: s.lastDraw,
     lastGain: s.lastGain,
     // 望遠鏡でのぞいた手札は、のぞいた本人にだけ届ける
-    peek: s.lastPeek && s.lastPeek.byId === viewerId ? { targetName: s.lastPeek.targetName, hand: s.lastPeek.hand } : undefined,
+    peek:
+      s.lastPeek && s.lastPeek.byId === viewerId
+        ? { targetName: s.lastPeek.targetName, hand: s.lastPeek.hand }
+        : undefined,
   };
 }

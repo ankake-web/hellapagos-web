@@ -15,7 +15,7 @@ const finish = (code, msg) => {
   host.close();
   process.exit(code);
 };
-const timer = setTimeout(() => finish(1, '✗ タイムアウト（デッドロックの可能性）'), 90000);
+const timer = setTimeout(() => finish(1, '✗ タイムアウト（デッドロックの可能性）'), 360000);
 // 進行停滞ウォッチドッグ
 const watch = setInterval(() => {
   if (Date.now() - lastChange > 20000) {
@@ -54,6 +54,15 @@ host.on('game:state', (s) => {
     return finish(0, '✓ 新モデルE2E 完走成功');
   }
   if (!me || !me.alive || me.escaped) return;
+  if(s.tableMoment) return;
+  if(s.pendingCard) {
+    const d=s.pendingCard;
+    if(d.playerId===s.youId) {
+      const choiceId=d.kind==='tie' ? d.targetIds[0] : d.kind==='search' ? d.cards[0].id : me.hand[0].id;
+      host.emit('card:resolve',{choiceId});
+    }
+    return;
+  }
 
   if (s.phase === 'action' && s.isYourTurn) {
     const need = s.seatsNeeded;

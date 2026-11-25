@@ -13,6 +13,7 @@ import {
   playCard,
   resolveSurvival,
   resolveVote,
+  resolveCardDecision,
   startGame,
   takeAction,
 } from './engine.js';
@@ -35,7 +36,7 @@ function card(id: string, kind: Card['kind']): Card {
 
 // ---- 袋・初期値テーブル ----
 test('袋は 白5(1,1,2,2,3)＋黒1 で構成', () => {
-  const fish = BAG.filter((b) => 'fish' in b).map((b) => (b as { fish: number }).fish).sort();
+  const fish = BAG.filter((b) => !('snake' in b)).map((b) => b.fish).sort();
   assert.deepEqual(fish, [1, 1, 2, 2, 3]);
   assert.equal(BAG.filter((b) => 'snake' in b).length, 1);
 });
@@ -151,7 +152,7 @@ test('資源0でも該当カードを出せた者だけ生存する', () => {
   assert.equal(s.players.find((p) => p.id === 'p1')!.alive, false, '非所持者は死亡');
 });
 
-test('釣りの黒玉は不漁（食料増えず・病気にならない）', () => {
+test('釣りの黒玉は魚3匹（木集めと違い、病気にならない）', () => {
   let found = false;
   for (let seed = 1; seed <= 400 && !found; seed++) {
     let s = mk(3, seed);
@@ -162,7 +163,7 @@ test('釣りの黒玉は不漁（食料増えず・病気にならない）', ()
     const ld = after.lastDraw;
     if (ld && ld.balls.some((b) => 'snake' in b)) {
       found = true;
-      assert.equal(after.food, before, '不漁なので食料は増えない');
+      assert.equal(after.food, before + 3, '黒玉にも魚3匹が描かれている');
       assert.equal(after.players.find((p) => p.id === a.id)!.sick, false, '釣りでは病気にならない');
     }
   }
@@ -185,6 +186,8 @@ test('同票は親が裁定する', () => {
   s = castVote(s, 'p3', 'p1');
   assert.ok(isVoteReady(s));
   s = resolveVote(s);
+  assert.equal(s.pendingCard?.kind,'tie');
+  s = resolveCardDecision(s,'p0','p2');
   assert.equal(s.players.find((p) => p.id === 'p2')!.alive, false, '親が指した p2 が脱落');
 });
 
@@ -345,10 +348,10 @@ test('永続カードは使って初めて公開され、効果が出る（斧�
 });
 
 // ---- デッキ構成（復元値）と新カード ----
-test('漂着物デッキは合計54枚', () => {
+test('拡張入り漂着物デッキは合計74枚', () => {
   const total = Object.values(DECK_COMPOSITION).reduce((a, b) => a + b, 0);
-  assert.equal(total, 54);
-  assert.equal(DECK_TOTAL, 54);
+  assert.equal(total, 74);
+  assert.equal(DECK_TOTAL, 74);
 });
 
 test('ココナッツは水+COCONUT_WATER（プールに加わる）', () => {
@@ -360,7 +363,7 @@ test('ココナッツは水+COCONUT_WATER（プールに加わる）', () => {
   assert.equal(s.water, Math.min(RESOURCE_CAP, before + COCONUT_WATER));
 });
 
-test('ほら貝で進行中の追放を1回無効化（誰も脱落しない）', () => {
+test('ほら貝は今ラウンドの親となり、投票対象から外れる（不足人数は減らない）', () => {
   let s = mk(3, 8);
   s.players.forEach((p) => (p.hand = []));
   s.phase = 'vote';
@@ -370,6 +373,9 @@ test('ほら貝で進行中の追放を1回無効化（誰も脱落しない）'
   const beforeAlive = aliveCount(s);
   s = playCard(s, 'p1', 'h1');
   assert.equal(aliveCount(s), beforeAlive, '誰も脱落していない');
+  assert.equal(s.firstPlayerIndex,1);
+  assert.equal(s.voteImmuneId,'p1');
+  assert.equal(s.pendingEliminations,1);
   assert.equal(s.players.find((p) => p.id === 'p1')!.hand.length, 0, 'ほら貝は消費');
 });
 

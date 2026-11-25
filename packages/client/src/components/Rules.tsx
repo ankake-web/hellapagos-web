@@ -1,3 +1,5 @@
+import { UiIcon } from '../assets/icons.js';
+
 interface Props {
   onClose: () => void;
 }
@@ -7,7 +9,7 @@ export function Rules({ onClose }: Props) {
     <div className="overlay" onClick={onClose}>
       <div className="modal rules" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>遊び方</h2>
+          <h2 className="with-ic"><UiIcon name="book" size={22} />遊び方</h2>
           <button className="btn ghost small" onClick={onClose}>
             閉じる
           </button>
@@ -36,7 +38,7 @@ export function Rules({ onClose }: Props) {
               <span>木集め（船）</span>
               <span>難破船を漁る（カード）</span>
             </div>
-            木集めは「さらに引く」とヘビ（黒玉）の危険。噛まれると病気で次の手番を休み、追加ぶんの木も失います。
+            釣りでは黒玉も魚3匹。木集めは追加の玉を同時に引き、ヘビ（黒玉）があれば失敗。噛まれると病気で次の手番を休み、追加ぶんの木も失います。
           </li>
           <li>
             <strong>生存判定</strong>：生存者1人につき水1・食料1を消費。足りなければ
@@ -45,7 +47,7 @@ export function Rules({ onClose }: Props) {
           <li><strong>脱出</strong>：席と備蓄が揃えば出航を投票。嵐の日は強制的に脱出判定。</li>
         </ol>
 
-        <h3>カードの使い方（難破船で入手）</h3>
+        <h3>カード74枚（基本54＋拡張20）</h3><p>初期手札は3〜8人なら4枚、9〜12人なら3枚。残りが難破船の山札になるよ。拡張の道具入りで、キャラクター・イベントは使いません。</p><h3>カードの使い方</h3>
         <ul className="rule-items">
           <li>
             <strong>資源（水/食料）</strong>：生存判定で「みんなの蓄えに出す（全員のため）」か、
@@ -53,14 +55,14 @@ export function Rules({ onClose }: Props) {
           </li>
           <li>
             <strong>永続（斧・釣り竿・水筒・水晶玉・棍棒）</strong>：
-            <strong>使って初めて発動＆公開</strong>され、以後ずっと効果が続きます（斧＝木+1／釣り竿＝魚×2／水筒＝水×2／棍棒＝自分の票が2票）。
+            <strong>使って初めて発動＆公開</strong>され、以後ずっと効果が続きます（斧＝木+1／釣り竿＝2玉の魚を合計／水筒＝水×2／棍棒＝自分の票が2票）。
             使うまで他人には見えません。
           </li>
           <li>
             <strong>単発</strong>：拳銃（射殺して所持品を奪う・トタン板で1回防げる）／睡眠薬（3人から各1枚奪う）／
             血清（ヘビ毒を治すが、その回の木は失う）／ブードゥー人形（死者を蘇生）／
             望遠鏡（相手の手札を覗く）／マッチ（汚れた水・腐った魚の病気を防ぐ）／
-            人肉BBQ（死体を食料に変える）／ほら貝（進行中の追放を1回無効化）。
+            人肉BBQ（死体を食料に変える）／ほら貝（このラウンドの親になり、投票の対象から外れる）。
           </li>
           <li>
             <strong>無用品</strong>：効果はなく<strong>使えません</strong>。手札に残るので、
@@ -68,7 +70,7 @@ export function Rules({ onClose }: Props) {
           </li>
         </ul>
 
-        <h3>AIと駆け引き</h3>
+        <h3>拡張の道具</h3><p>浮き輪は探索で2枚から1枚を選ぶ。ムチは相手に木集めをさせ、引く玉数を指定。ダムダム弾は防具を貫き、反射板は通常弾を左隣へ跳ね返します。カードをタップすると使える条件と効果が見られるよ。</p><h3>投票</h3><p>同票になったら親が候補から選択。水晶玉の装備者は、ほかの人の票を見て最後に投票できます。</p><h3>CPUと駆け引き</h3>
         <p>
           人数が足りなければAIを追加できます（オフラインは最初からCPU3人）。AIには
           <strong>協力的・溜め込み屋・狙撃手・臆病者</strong>の性格があり（正体はゲーム終了時に判明）、

@@ -17,6 +17,26 @@ export type Speed = 'slow' | 'normal' | 'fast';
 
 /** 漂着物カードの種類 */
 export type CardKind =
+  | 'coffee'
+  | 'barometer'
+  | 'wooden_plank'
+  | 'food_mill'
+  | 'pendulum'
+  | 'flashlight'
+  | 'hollow_bullet'
+  | 'fish_tank'
+  | 'duck_float'
+  | 'wooden_crate'
+  | 'cat'
+  | 'metal_detector'
+  | 'whip'
+  | 'shaman_kit'
+  | 'diet_magazine'
+  | 'instant_noodles'
+  | 'whetstone'
+  | 'concave_plate'
+  | 'rum'
+  | 'taser'
   // 資源
   | 'water_bottle'
   | 'coconut'
@@ -50,6 +70,8 @@ export type CardKind =
 export interface Card {
   id: string;
   kind: CardKind;
+  name?: string;
+  expansion?: boolean;
 }
 
 export interface WeatherCard {
@@ -84,6 +106,8 @@ export interface Player {
   acted: boolean;
   /** 使用して公開済みの永続カード種別（斧・銃など。使うまで他者には非公開） */
   revealed: CardKind[];
+  equipment?: Card[];
+  extraActions?: number;
   botPersona?: BotPersona;
   difficulty?: Difficulty;
 }
@@ -111,6 +135,10 @@ export type VoteReason = 'water' | 'food' | 'hurricane';
 export type GainKind = 'food' | 'water' | 'wood' | 'card';
 
 export interface GameState {
+  tieChoiceId?: string;
+  pendingCard?: CardDecision;
+  voteImmuneId?: string;
+  privatePreview?: { byId: string; title: string; cards?: Card[]; weather?: WeatherCard[] };
   phase: Phase;
   round: number;
   players: Player[];
@@ -157,6 +185,8 @@ export interface GameState {
 // ===== 公開（リダクション済み） =====
 
 export interface PublicPlayer {
+  hasVoted?: boolean;
+  equipment?: Card[];
   id: string;
   name: string;
   isBot: boolean;
@@ -177,6 +207,11 @@ export interface PublicPlayer {
 }
 
 export interface PublicGameState {
+  voteImmuneId?: string;
+  pendingCard?: CardDecision;
+  privatePreview?: { title: string; cards?: Card[]; weather?: WeatherCard[] };
+  wreckageRemaining?: number;
+  tableMoment?: TableMoment;
   phase: Phase;
   round: number;
   players: PublicPlayer[];
@@ -210,6 +245,32 @@ export interface PublicGameState {
   deadlineAt?: number;
 }
 
+export interface TableMoment {
+  cardKind?: CardKind;
+  id: number;
+  stage: 'thinking' | 'announce' | 'result';
+  playerId: string;
+  action?: ActionType;
+  title: string;
+  detail: string;
+  until: number;
+}
+
+export interface CardDecision {
+  kind: 'search' | 'rum' | 'tie';
+  advanceTurn?: boolean;
+  targetIds?: string[];
+  playerId: string;
+  cards?: Card[];
+  queue?: string[];
+}
+export interface CardOptions {
+  action?: ActionType;
+  woodPush?: number;
+  targetCardId?: string;
+  useHollowBullet?: boolean;
+}
+
 export interface ChatMessage {
   id: number;
   name: string;
@@ -227,9 +288,7 @@ export interface LeaderboardEntry {
 
 // ===== Socket.IO イベント =====
 
-export type Ack =
-  | { ok: true; roomId: string; playerId: string; spectator?: boolean }
-  | { ok: false; error: string };
+export type Ack = { ok: true; roomId: string; playerId: string; spectator?: boolean } | { ok: false; error: string };
 
 export interface ServerToClientEvents {
   'game:state': (state: PublicGameState) => void;
@@ -248,7 +307,8 @@ export interface ClientToServerEvents {
   'game:setConfig': (p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }) => void;
   'game:start': () => void;
   'action:choose': (p: { action: ActionType; woodPush?: number }) => void;
-  'card:play': (p: { cardId: string; targetId?: string | null }) => void;
+  'card:resolve': (p: { choiceId: string }) => void;
+  'card:play': (p: { cardId: string; targetId?: string | null; options?: CardOptions }) => void;
   'survival:pass': () => void;
   'vote:cast': (p: { targetId: string | null }) => void;
   'escape:vote': (p: { leave: boolean }) => void;

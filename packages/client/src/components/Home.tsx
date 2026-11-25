@@ -3,6 +3,7 @@ import { NAME_POOL } from '@hellapagos/shared';
 import type { Stats } from '../stats.js';
 import { Rules } from './Rules.js';
 import { Leaderboard } from './Leaderboard.js';
+import { HeroArt, UiIcon } from '../assets/icons.js';
 
 function suggestName(): string {
   return NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)];
@@ -28,15 +29,17 @@ export function Home({ onCreate, onJoin, stats }: Props) {
   return (
     <div className="home">
       <div className="home-card">
+        <HeroArt className="hero" />
         <h1>ヘルパゴス</h1>
         <p className="subtitle">無人島ニセ協力サバイバル。<br />嵐が来る前に、いかだで脱出せよ。</p>
 
+        <p className="deck-edition">基本54＋拡張20 ／ 漂着物カード74枚</p>
         <div className="home-links">
-          <button className="btn ghost small" onClick={() => setShowRules(true)}>
-            遊び方
+          <button className="btn ghost small with-ic" onClick={() => setShowRules(true)}>
+            <UiIcon name="book" size={16} />遊び方
           </button>
-          <button className="btn ghost small" onClick={() => setShowRanking(true)}>
-            ランキング
+          <button className="btn ghost small with-ic" onClick={() => setShowRanking(true)}>
+            <UiIcon name="trophy" size={16} />ランキング
           </button>
         </div>
 

@@ -1,7 +1,8 @@
 // アセット・マニフェスト（単一の真実）。
 // 将来 ./cards/<key>.png を置くと、その水彩絵が SVG アイコンより自動で優先される
 // （Catan の「あれば実画像 / 無ければフォールバック」方式）。
-// 現状 ./cards にPNGは無いので CARD_ART は空 → すべて icons.tsx の SVG にフォールバックする（404 も出ない）。
+// 2026-08-25 時点＝./cards に PNG 35枚（CardKind 全24種＋グリフ11種）。カードは全種そろったので
+// SVG へ落ちるのは盤面グリフの一部だけ。PNG が無いキーは icons.tsx の SVG にフォールバックする（404 も出ない）。
 //
 // 追加方法: packages/client/src/assets/cards/<key>.png を置くだけ（key は CardKind か
 // 'fish' / 'water' / 'wood' / 'search' / 'ship' / 'snake' などのグリフ名）。Vite が import.meta.glob で自動検出する。

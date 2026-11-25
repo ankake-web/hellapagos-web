@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { PublicGameState } from '@hellapagos/shared';
 import { MAX_PLAYERS, MIN_PLAYERS } from '@hellapagos/shared';
 import { api } from '../api.js';
+import { BotFace, botIndexOf } from '../assets/icons.js';
 
 interface Props {
   view: PublicGameState;
@@ -49,7 +50,7 @@ export function Lobby({ view, onLeave, offline }: Props) {
           {view.players.map((p) => (
             <li key={p.id}>
               <span>
-                {p.isBot && <span className="pc-face bot">CPU</span>} {p.name}
+                {p.isBot && <BotFace name={p.name} index={botIndexOf(view.players, p.id)} size={22} />} {p.name}
                 {p.id === view.hostId && <span className="tag host">ホスト</span>}
                 {p.id === view.youId && <span className="tag you">あなた</span>}
               </span>

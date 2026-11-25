@@ -1,4 +1,5 @@
-import { DECK_COMPOSITION } from './deckConfig.js';
+import { BASE_DECK, EXPANSION_DECK, JUNK_NAMES } from './deckConfig.js';
+import { EXTRA_CARD_INFO } from './extraCards.js';
 import { Rng } from './rng.js';
 import type { CardKind, Difficulty, GameConfig, WeatherCard } from './types.js';
 
@@ -7,6 +8,7 @@ export const MAX_PLAYERS = 12;
 export const RESOURCE_CAP = 36;
 export const MAX_SEATS = 12;
 export const RAFT_LOOP = 6; // 木6で座席1
+export const RULESET_VERSION = 'wreckage-74-v1';
 
 export const DEFAULT_CONFIG: GameConfig = {
   soleSurvivor: false,
@@ -18,9 +20,34 @@ export const DEFAULT_CONFIG: GameConfig = {
 
 /** CPU/プレイヤーの名前候補（漂流者っぽい呼び名）。ランダムに割り当てる。 */
 export const NAME_POOL: readonly string[] = [
-  'カイ', 'ナギ', 'ソラ', 'ハル', 'ミオ', 'レン', 'ツバサ', 'コハク', 'シノ', 'リク',
-  'アサヒ', 'ユウ', 'ナミ', 'ホノ', 'イオ', 'クレハ', 'トウヤ', 'セナ', 'マレ', 'シオ',
-  'ヒナタ', 'カナタ', 'アオイ', 'リョウ', 'ノゾミ', 'ハヤテ', 'スイ', 'ルカ',
+  'カイ',
+  'ナギ',
+  'ソラ',
+  'ハル',
+  'ミオ',
+  'レン',
+  'ツバサ',
+  'コハク',
+  'シノ',
+  'リク',
+  'アサヒ',
+  'ユウ',
+  'ナミ',
+  'ホノ',
+  'イオ',
+  'クレハ',
+  'トウヤ',
+  'セナ',
+  'マレ',
+  'シオ',
+  'ヒナタ',
+  'カナタ',
+  'アオイ',
+  'リョウ',
+  'ノゾミ',
+  'ハヤテ',
+  'スイ',
+  'ルカ',
 ];
 export function randomName(rng: Rng, used: ReadonlySet<string> = new Set()): string {
   const avail = NAME_POOL.filter((n) => !used.has(n));
@@ -28,20 +55,21 @@ export function randomName(rng: Rng, used: ReadonlySet<string> = new Set()): str
   return rng.pick(pool);
 }
 
-// ===== 木玉の袋（白5: 魚 1,1,2,2,3 / 黒1: ヘビ）。毎回戻すので確率不変 =====
-export type Ball = { fish: number } | { snake: true };
+// 釣りは1玉引いて戻す。木集めは必要数を同時に引いてから全て戻す。
+// 黒玉も釣りでは魚3匹。病気になるのは木集めで黒玉を引いた場合だけ。
+export type Ball = { fish: number } | { snake: true; fish: 3 };
 export const BAG: readonly Ball[] = [
   { fish: 1 },
   { fish: 1 },
   { fish: 2 },
   { fish: 2 },
   { fish: 3 },
-  { snake: true },
+  { snake: true, fish: 3 },
 ];
 export function drawBall(rng: Rng): Ball {
   return BAG[rng.int(0, BAG.length - 1)];
 }
-export function isSnake(b: Ball): b is { snake: true } {
+export function isSnake(b: Ball): b is { snake: true; fish: 3 } {
   return 'snake' in b;
 }
 
@@ -78,12 +106,21 @@ export function buildWeatherDeck(rng: Rng): WeatherCard[] {
   return [...top, ...bottom]; // index0 = 最初に公開
 }
 
-// ===== 漂着物デッキ（54枚・枚数は deckConfig.ts の復元値）=====
-export function buildWreckageDeck(rng: Rng, startSeq: number): { deck: Array<{ id: string; kind: CardKind }>; nextSeq: number } {
+// ===== 漂着物デッキ（基本54＋拡張20＝74枚）=====
+export function buildWreckageDeck(
+  rng: Rng,
+  startSeq: number,
+): { deck: Array<{ id: string; kind: CardKind }>; nextSeq: number } {
   const cards: Array<{ id: string; kind: CardKind }> = [];
   let seq = startSeq;
-  for (const kind of Object.keys(DECK_COMPOSITION) as CardKind[]) {
-    for (let i = 0; i < DECK_COMPOSITION[kind]; i++) cards.push({ id: `c${seq++}`, kind });
+  let junk = 0;
+  for (const [index, kind] of [...BASE_DECK, ...EXPANSION_DECK].entries()) {
+    cards.push({
+      id: `c${seq++}`,
+      kind,
+      ...(kind === 'junk' ? { name: JUNK_NAMES[junk++] } : {}),
+      ...(index >= BASE_DECK.length ? { expansion: true } : {}),
+    });
   }
   return { deck: rng.shuffle(cards), nextSeq: seq };
 }
@@ -100,6 +137,7 @@ export const PERMANENT_KINDS: ReadonlySet<CardKind> = new Set<CardKind>([
   'crystal_ball',
   'club',
   'gun',
+  'duck_float',
 ]);
 export const RESOURCE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>([
   'water_bottle',
@@ -111,31 +149,55 @@ export const RESOURCE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>([
   'fruit_basket',
 ]);
 
-export const CARD_INFO: Record<CardKind, { icon: string; name: string; desc: string; cat: 'resource' | 'single' | 'permanent' | 'junk' }> = {
+export const CARD_INFO: Record<
+  CardKind,
+  { icon: string; name: string; desc: string; cat: 'resource' | 'single' | 'permanent' | 'junk' }
+> = {
+  ...EXTRA_CARD_INFO,
   water_bottle: { icon: '💧', name: '水ボトル', desc: '水+1。投票中は自分に使って身を守れる', cat: 'resource' },
-  coconut: { icon: '🥥', name: 'ココナッツの実', desc: '水+3。投票中は自分に使って身を守れる（イワシ缶の水版）', cat: 'resource' },
+  coconut: {
+    icon: '🥥',
+    name: 'ココナッツの実',
+    desc: '水+3。投票中は自分に使って身を守れる（イワシ缶の水版）',
+    cat: 'resource',
+  },
   dirty_water: { icon: '🥤', name: '汚れた水', desc: '水+1だが病気1ターン。投票中は自衛に使える', cat: 'resource' },
   sandwich: { icon: '🥪', name: 'サンドイッチ', desc: '食料+1。投票中は自分に使って身を守れる', cat: 'resource' },
   sardine_can: { icon: '🥫', name: 'イワシ缶', desc: '食料+3。投票中は自分に使って身を守れる', cat: 'resource' },
   rotten_fish: { icon: '🐟', name: '腐った魚', desc: '食料+1だが病気1ターン。投票中は自衛に使える', cat: 'resource' },
-  fruit_basket: { icon: '🧺', name: 'フルーツバスケット', desc: '不足時に誰も死なず両カウンターを0に（脱出補給は不可）', cat: 'resource' },
+  fruit_basket: {
+    icon: '🧺',
+    name: 'フルーツバスケット',
+    desc: '不足時に誰も死なず両カウンターを0に（脱出補給は不可）',
+    cat: 'resource',
+  },
   serum: { icon: '💉', name: '血清', desc: 'ヘビ毒を治す（その木集めの木は失う）', cat: 'single' },
   voodoo: { icon: '🪆', name: 'ブードゥー人形', desc: 'ターン開始時に死者1人を蘇生', cat: 'single' },
   sleeping_pills: { icon: '💊', name: '睡眠薬', desc: '異なる3人から各1枚ランダムに奪う', cat: 'single' },
   alarm_clock: { icon: '⏰', name: '目覚まし時計', desc: '次の親を選ぶ', cat: 'single' },
   telescope: { icon: '🔭', name: '望遠鏡', desc: '他プレイヤー1人の手札を全て見る（自分だけ）', cat: 'single' },
-  matches: { icon: '🔥', name: 'マッチ', desc: '次に使う汚れた水/腐った魚の「病気」を無効化して安全に得る', cat: 'single' },
+  matches: {
+    icon: '🔥',
+    name: 'マッチ',
+    desc: '次に使う汚れた水/腐った魚の「病気」を無効化して安全に得る',
+    cat: 'single',
+  },
   cannibal_bbq: { icon: '🍖', name: '人肉BBQセット', desc: '脱落者がいる時のみ：死体1つにつき食料+2', cat: 'single' },
-  conch: { icon: '🐚', name: 'ほら貝', desc: '進行中の追放を1回無効化（誰も脱落させない）', cat: 'single' },
+  conch: { icon: '🐚', name: 'ほら貝', desc: 'このラウンドの親になり、投票の対象から外れる', cat: 'single' },
   canteen: { icon: '🚰', name: '水筒', desc: '使うと発動：以後ずっと水汲み×2（公開される）', cat: 'permanent' },
-  fishing_rod: { icon: '🎣', name: '釣り竿', desc: '使うと発動：以後ずっと魚×2（公開される）', cat: 'permanent' },
+  fishing_rod: { icon: '🎣', name: '釣り竿', desc: '装備後の釣りは玉を2個引き、魚の合計を得る', cat: 'permanent' },
   axe: { icon: '🪓', name: '斧', desc: '使うと発動：以後ずっと木集め+1（公開される）', cat: 'permanent' },
-  crystal_ball: { icon: '🔮', name: '水晶玉', desc: '使うと発動・公開される永続カード', cat: 'permanent' },
+  crystal_ball: { icon: '🔮', name: '水晶玉', desc: '装備後、他の人の投票を見て最後に投票できる', cat: 'permanent' },
   club: { icon: '🏏', name: '棍棒', desc: '使うと発動：以後ずっと自分の票が2票になる（公開）', cat: 'permanent' },
   gun: { icon: '🔫', name: '銃', desc: '弾があれば他者を排除（使うと公開・脱落でも回収）', cat: 'permanent' },
   bullet: { icon: '💥', name: '弾', desc: '銃と併用・使用後失う', cat: 'permanent' },
   tin_sheet: { icon: '🛡️', name: 'トタン板', desc: '銃で撃たれた時に自動で1回だけ無効化（使うと消費）', cat: 'single' },
-  junk: { icon: '🗑️', name: '無用品', desc: '効果なし・使用不可。手札に残るので「何を持っているか」怪しまれる', cat: 'junk' },
+  junk: {
+    icon: '🗑️',
+    name: '無用品',
+    desc: '効果なし・使用不可。手札に残るので「何を持っているか」怪しまれる',
+    cat: 'junk',
+  },
 };
 
 // ===== CPU 性格・難易度のチューニング =====

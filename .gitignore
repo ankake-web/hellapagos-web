@@ -6,3 +6,10 @@ dist/
 .vite/
 packages/server/data/
 asset/
+AGENTS.md
+CLAUDE.md
+PROGRESS.md
+KICKOFF.md
+MEMORY.md
+_memory/
+.codex/

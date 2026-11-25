@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import type { ActionType, Card, CardKind, ChatMessage, PublicGameState, PublicPlayer } from '@hellapagos/shared';
-import { CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
+import type {
+  ActionType,
+  Card,
+  CardKind,
+  CardOptions,
+  ChatMessage,
+  PublicGameState,
+  PublicPlayer,
+} from '@hellapagos/shared';
+import { ACTION_SCENE, CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
 import { api } from '../api.js';
-import { GameIcon, UiIcon } from '../assets/icons.js';
+import { BotFace, GameIcon, UiIcon, botIndexOf } from '../assets/icons.js';
 import { ART } from '../assets/manifest.js';
 import { playSound } from '../sound.js';
 import { ConfirmModal, type ConfirmLine } from './Confirm.js';
@@ -60,7 +68,10 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
   const [tab, setTab] = useState<'log' | 'chat'>('log');
   const freshDraw = useFreshDraw(view);
 
-  useEffect(() => { setTargeting(null); setTargetConfirm(null); }, [view.phase, view.round, view.currentActorId]);
+  useEffect(() => {
+    setTargeting(null);
+    setTargetConfirm(null);
+  }, [view.phase, view.round, view.currentActorId]);
 
   const targetable = (p: PublicPlayer): boolean => {
     if (!targeting) return false;
@@ -84,6 +95,7 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
   return (
     <div className={`board ${weatherClass}`}>
       <Header view={view} />
+      <TableTheater view={view} />
       <HandBar me={me} onSelect={setSelectedCard} />
       <WeatherFX view={view} />
       <RoundSplash view={view} />
@@ -93,8 +105,12 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
       <FlyLayer view={view} />
       {targeting && (
         <div className="banner target">
-          <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} /> {targeting.mode === 'gun' ? '撃つ相手' : targeting.mode === 'telescope' ? 'のぞき見る相手' : '蘇生する相手'}を選択
-          <button className="btn ghost small" onClick={() => setTargeting(null)}>キャンセル</button>
+          <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} />{' '}
+          {targeting.mode === 'gun' ? '撃つ相手' : targeting.mode === 'telescope' ? 'のぞき見る相手' : '蘇生する相手'}
+          を選択
+          <button className="btn ghost small" onClick={() => setTargeting(null)}>
+            キャンセル
+          </button>
         </div>
       )}
       <div className="board-main">
@@ -105,8 +121,14 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
         </div>
         <div className={`board-right tab-${tab}`}>
           <div className="right-tabs">
-            <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>記録</button>
-            <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>チャット</button>
+            <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>
+              <UiIcon name="log" size={17} />
+              記録
+            </button>
+            <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>
+              <UiIcon name="chat" size={17} />
+              チャット
+            </button>
           </div>
           <LogPanel view={view} />
           <Chat view={view} chat={chat} onSay={onSay} />
@@ -125,6 +147,8 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
         />
       )}
       <PeekModal peek={view.peek} />
+      <PrivatePreview preview={view.privatePreview} />
+      {view.pendingCard && !view.tableMoment && <CardDecisionPanel view={view} me={me} />}
       {targeting && targetConfirm && (
         <TargetConfirm
           mode={targeting.mode}
@@ -133,8 +157,102 @@ export function Board({ view, chat, onSay, onLeave }: Props) {
           onConfirm={commitTarget}
         />
       )}
-      {view.phase === 'gameover' && <GameOver view={view} me={me} onLeave={onLeave} />}
+      {view.phase === 'gameover' && !view.tableMoment && <GameOver view={view} me={me} onLeave={onLeave} />}
     </div>
+  );
+}
+
+/** 卓の中央で、誰が・何を選び・どうなったかを一つずつ見届ける。 */
+function TableTheater({ view }: { view: PublicGameState }) {
+  const theaterRef = useRef<HTMLElement>(null);
+  const m = view.tableMoment;
+  useEffect(() => {
+    const el = theaterRef.current;
+    if (!m || !el) return;
+    const box = el.getBoundingClientRect();
+    if (box.bottom < 80 || box.top < 0)
+      el.scrollIntoView({
+        block: 'start',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+      });
+  }, [m?.id]);
+  const actor = view.players.find((p) => p.id === (m?.playerId ?? view.currentActorId));
+  const me = view.players.find((p) => p.isYou);
+  const stage = m?.stage ?? (view.isYourTurn ? 'your-turn' : 'waiting');
+  const name = actor?.name ?? '';
+  const label =
+    m?.stage === 'thinking'
+      ? '行動を選んでいる'
+      : m?.stage === 'announce'
+        ? '行動を宣言'
+        : m?.stage === 'result'
+          ? '行動の結果'
+          : view.isYourTurn
+            ? 'あなたの手番'
+            : phaseLabel(view);
+  const title =
+    m?.title ?? (view.isYourTurn ? `${me?.name ?? 'あなた'}、どう動く？` : actor ? `${name}の手番` : phaseLabel(view));
+  const draw =
+    m?.stage === 'result' && view.lastDraw?.playerId === m.playerId && view.lastDraw.action === m.action
+      ? view.lastDraw
+      : null;
+  const found =
+    m?.stage === 'result' && m.playerId === view.youId && m.action === 'search' && m.title === '漂着物カードを1枚発見'
+      ? me?.hand?.at(-1)
+      : undefined;
+  return (
+    <section ref={theaterRef} className={`table-theater stage-${stage}`} aria-label="卓の様子" aria-live="polite">
+      <div className="theater-avatar">
+        {actor?.isBot ? (
+          <BotFace name={name} index={botIndexOf(view.players, actor.id)} size={60} />
+        ) : actor?.isYou && ART['you'] ? (
+          <img src={ART['you']} alt="" width={60} height={60} style={{ borderRadius: '50%' }} />
+        ) : (
+          <GameIcon name={m?.action ?? 'ship'} size={60} />
+        )}
+      </div>
+      <div
+        className="theater-copy"
+        key={m ? `${m.id}-${m.stage}` : `${view.round}-${view.phase}-${view.currentActorId}`}
+      >
+        <div className="theater-kicker">
+          {name && <strong>{name}</strong>}
+          <span>{label}</span>
+        </div>
+        <h2>{title}</h2>
+        {m?.stage === 'thinking' ? (
+          <div className="thinking-dots" aria-label="考え中">
+            <i />
+            <i />
+            <i />
+          </div>
+        ) : m?.action && m.stage === 'announce' ? (
+          <p>{ACTION_SCENE[m.action].place}へ向かう</p>
+        ) : m?.detail ? (
+          <p>{m.detail}</p>
+        ) : null}
+        {draw && draw.balls.length > 0 && <Balls balls={draw.balls} action={draw.action} small />}
+        {found ? (
+          <div className="found-card">
+            <GameIcon name={found.kind} size={38} />
+            <strong>{found.name ?? CARD_INFO[found.kind].name}</strong>
+            <span>手札に加わった！</span>
+          </div>
+        ) : (
+          m?.action === 'search' &&
+          m.stage === 'result' && (
+            <div className="wreckage-reveal" aria-label="引いたカードは持ち主だけが見られます">
+              <span />
+              <span />
+              <span />
+            </div>
+          )
+        )}
+      </div>
+      {(m?.action || m?.cardKind) && m.stage !== 'thinking' && (
+        <GameIcon name={m.cardKind ?? m.action!} size={62} className="theater-action-icon" />
+      )}
+    </section>
   );
 }
 
@@ -143,7 +261,10 @@ function useFreshDraw(view: PublicGameState): PublicGameState['lastDraw'] | null
   const [fresh, setFresh] = useState<PublicGameState['lastDraw'] | null>(null);
   const ref = useRef('');
   const d = view.lastDraw;
-  const sig = d && d.balls.length ? `${d.playerId}|${d.balls.length}|${view.log.length}` : '';
+  const actionLog = d
+    ? [...view.log].reverse().find((e) => e.playerId === d.playerId && /釣り|木集め/.test(e.text))?.id
+    : undefined;
+  const sig = d && d.balls.length ? `${d.playerId}|${actionLog}` : '';
   useEffect(() => {
     if (!d || !d.balls.length || sig === ref.current) return;
     ref.current = sig;
@@ -219,19 +340,31 @@ function TargetConfirm({
 }
 
 /** 袋の玉。魚は数字、ヘビはヘビのアイコン（木集めのみ）、釣りのハズレは灰色✗。緊張感のため1個ずつ遅延表示。 */
-function Balls({ balls, action, small }: { balls: Array<{ fish: number } | { snake: true }>; action: ActionType; small?: boolean }) {
+function Balls({
+  balls,
+  action,
+  small,
+}: {
+  balls: Array<{ fish: number } | { snake: true }>;
+  action: ActionType;
+  small?: boolean;
+}) {
   // ヘビは最後に出す（最後にドキッ）
   const ordered = [...balls].sort((a, b) => Number('snake' in a) - Number('snake' in b));
   return (
     <div className={`balls ${small ? 'small' : ''}`}>
       {ordered.map((b, i) => {
         const snake = 'snake' in b;
-        const cls = snake ? (action === 'wood' ? 'snake' : 'miss') : '';
-        const label = snake
-          ? action === 'wood'
-            ? <GameIcon name="snake" size={small ? 16 : 30} />
-            : '✗'
-          : (b as { fish: number }).fish;
+        const cls = snake && action === 'wood' ? 'snake' : '';
+        const label = snake ? (
+          action === 'wood' ? (
+            <GameIcon name="snake" size={small ? 16 : 30} />
+          ) : (
+            ((b as { fish?: number }).fish ?? 3)
+          )
+        ) : (
+          (b as { fish: number }).fish
+        );
         return (
           <span key={i} className={`ball ${cls}`} style={{ animationDelay: `${i * (small ? 0.12 : 0.32)}s` }}>
             {label}
@@ -244,6 +377,7 @@ function Balls({ balls, action, small }: { balls: Array<{ fish: number } | { sna
 
 /** 中央の大きな袋引き演出は「自分の番」か「ヘビが出た時」だけ（CPUの平常ドローはプレイヤーカードに小さく出す）。 */
 function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameState['lastDraw'] | null }) {
+  if (view.tableMoment) return null;
   if (!draw || !draw.balls.length) return null;
   const isMine = draw.playerId === view.youId;
   const snake = draw.balls.some((b) => 'snake' in b) && draw.action === 'wood';
@@ -254,13 +388,17 @@ function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameSta
   const fishTotal = draw.balls.reduce((n, b) => n + ('fish' in b ? b.fish : 0), 0);
   return (
     <div className="draw-pop">
-      <span className="draw-who">{who} の{draw.action === 'fish' ? '釣り' : '木集め'}</span>
+      <span className="draw-who">
+        {who} の{draw.action === 'fish' ? '釣り' : '木集め'}
+      </span>
       <Balls balls={draw.balls} action={draw.action} />
       <span className="draw-sum">
         {snake
           ? '噛まれた！追加分は失う（確定分の木は確保）'
           : draw.action === 'fish'
-            ? (fishTotal > 0 ? `食料 +${fishTotal}` : '不漁…')
+            ? fishTotal > 0
+              ? `食料 +${fishTotal}`
+              : '不漁…'
             : `木 +${draw.balls.length}`}
       </span>
     </div>
@@ -270,6 +408,7 @@ function DrawCenter({ view, draw }: { view: PublicGameState; draw: PublicGameSta
 /** 木集めの「成功（木材ゲット）／失敗（ヘビに噛まれる）」を一枚絵で大きく見せる演出。
  *  art/wood-ok.* と art/wood-bite.* を置くと有効化。無ければ DrawCenter の通常表示にフォールバック。 */
 function WoodSplash({ view, draw }: { view: PublicGameState; draw: PublicGameState['lastDraw'] | null }) {
+  if (view.tableMoment) return null;
   if (!draw || draw.action !== 'wood' || draw.playerId !== view.youId || !draw.balls.length) return null;
   const bit = draw.balls.some((b) => 'snake' in b);
   const art = bit ? ART['wood-bite'] : ART['wood-ok'];
@@ -278,7 +417,9 @@ function WoodSplash({ view, draw }: { view: PublicGameState; draw: PublicGameSta
     <div className="wood-splash" aria-hidden>
       <div className={`ws-card ${bit ? 'bite' : 'ok'}`}>
         <img className="ws-art" src={art} alt="" />
-        <span className="ws-text">{bit ? 'ヘビに噛まれた！毒で次ラウンド休み・追加分は失う' : `木材 +${draw.balls.length} を確保！`}</span>
+        <span className="ws-text">
+          {bit ? 'ヘビに噛まれた！毒で次ラウンド休み・追加分は失う' : `木材 +${draw.balls.length} を確保！`}
+        </span>
       </div>
     </div>
   );
@@ -314,8 +455,20 @@ function Tracks({ view }: { view: PublicGameState }) {
   return (
     <div className="tracks">
       <div className="tracks-top">
-        <ResCell icon="fish" value={view.food} need={need} flyKey="food" title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`} />
-        <ResCell icon="water" value={view.water} need={need} flyKey="water" title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`} />
+        <ResCell
+          icon="fish"
+          value={view.food}
+          need={need}
+          flyKey="food"
+          title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`}
+        />
+        <ResCell
+          icon="water"
+          value={view.water}
+          need={need}
+          flyKey="water"
+          title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`}
+        />
       </div>
       <ResCell
         icon="ship"
@@ -387,11 +540,18 @@ function ResCell({
 }) {
   const short = value < need;
   return (
-    <div className={`rcell ${raft ? 'raft' : ''} ${big ? 'big' : ''} ${short ? 'short' : 'ok'}`} data-fly={flyKey} title={title}>
+    <div
+      className={`rcell ${raft ? 'raft' : ''} ${big ? 'big' : ''} ${short ? 'short' : 'ok'}`}
+      data-fly={flyKey}
+      title={title}
+    >
       <GameIcon name={icon} size={big ? 64 : 44} className="rcell-ic" />
       <div className="rcell-body">
+        <span className="resource-title">{icon === 'fish' ? '食料' : icon === 'water' ? '水' : 'いかだ'}</span>
         <div className="rcell-num">
-          <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>{value}</strong>
+          <strong key={value} className={`num-pop ${short ? 'short' : 'ok'}`}>
+            {value}
+          </strong>
           <small>/{need}</small>
         </div>
         {raft ? <RaftMeter seats={value} need={need} progress={progress ?? 0} /> : <Pips value={value} need={need} />}
@@ -401,7 +561,17 @@ function ResCell({
   );
 }
 
-function PlayerGrid({ view, draw, targetable, onPick }: { view: PublicGameState; draw: PublicGameState['lastDraw'] | null; targetable: (p: PublicPlayer) => boolean; onPick: (p: PublicPlayer) => void }) {
+function PlayerGrid({
+  view,
+  draw,
+  targetable,
+  onPick,
+}: {
+  view: PublicGameState;
+  draw: PublicGameState['lastDraw'] | null;
+  targetable: (p: PublicPlayer) => boolean;
+  onPick: (p: PublicPlayer) => void;
+}) {
   return (
     <div className="players">
       {view.players.map((p) => (
@@ -410,16 +580,36 @@ function PlayerGrid({ view, draw, targetable, onPick }: { view: PublicGameState;
     </div>
   );
 }
-function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; view: PublicGameState; draw: PublicGameState['lastDraw'] | null; targetable: boolean; onPick: () => void }) {
+function PlayerCard({
+  p,
+  view,
+  draw,
+  targetable,
+  onPick,
+}: {
+  p: PublicPlayer;
+  view: PublicGameState;
+  draw: PublicGameState['lastDraw'] | null;
+  targetable: boolean;
+  onPick: () => void;
+}) {
   const dead = !p.alive && !p.escaped;
   const isActor = view.currentActorId === p.id;
   const myDraw = draw && draw.playerId === p.id ? draw : null;
   return (
-    <div className={`pcard ${dead ? 'dead' : ''} ${p.escaped ? 'escaped' : ''} ${isActor ? 'actor' : ''} ${targetable ? 'targetable' : ''}`} data-pid={p.id} onClick={targetable ? onPick : undefined}>
+    <div
+      className={`pcard ${dead ? 'dead' : ''} ${p.escaped ? 'escaped' : ''} ${isActor ? 'actor' : ''} ${targetable ? 'targetable' : ''}`}
+      data-pid={p.id}
+      onClick={targetable ? onPick : undefined}
+    >
       <div className="pcard-top">
-        {p.isYou && ART['you'] ? <img className="pc-avatar" src={ART['you']} alt="" /> : p.isBot ? <span className="pc-face bot">CPU</span> : null}
+        {p.isYou && ART['you'] ? (
+          <img className="pc-avatar" src={ART['you']} alt="" />
+        ) : p.isBot ? (
+          <BotFace name={p.name} index={botIndexOf(view.players, p.id)} size={24} />
+        ) : null}
         <span className="pname">{p.name}</span>
-        {p.id === view.hostId && <span className="tag host">主</span>}
+        {p.id === view.players[view.firstPlayerIndex]?.id && <span className="tag host">親</span>}
         {p.isYou && <span className="tag you">自</span>}
       </div>
       <div className="pcard-status">
@@ -428,12 +618,20 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
         {dead && <span className="badge death">死亡</span>}
         {p.sick && p.alive && <span className="badge sick">病気</span>}
         {p.resting && p.alive && <span className="badge sick">休み</span>}
-        {!myDraw && !dead && !p.escaped && isActor && view.phase === 'action' && <span className="badge actor">手番</span>}
+        {!myDraw && !dead && !p.escaped && isActor && view.phase === 'action' && (
+          <span className="badge actor">手番</span>
+        )}
         {!dead && !p.escaped && p.acted && view.phase === 'action' && <span className="badge done">済</span>}
       </div>
       <div className="pcard-foot">
         <span className="stash">手札 {p.handCount}</span>
-        {p.permanents.length > 0 && <span className="perms">{p.permanents.map((k) => <GameIcon key={k} name={k} size={16} fallback={CARD_INFO[k as CardKind].icon} />)}</span>}
+        {p.permanents.length > 0 && (
+          <span className="perms">
+            {p.permanents.map((k) => (
+              <GameIcon key={k} name={k} size={16} fallback={CARD_INFO[k as CardKind].icon} />
+            ))}
+          </span>
+        )}
         {view.phase === 'vote' && p.votesReceived ? <span className="votes">{p.votesReceived}票</span> : null}
       </div>
     </div>
@@ -441,8 +639,27 @@ function PlayerCard({ p, view, draw, targetable, onPick }: { p: PublicPlayer; vi
 }
 
 function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) {
+  if (view.pendingCard)
+    return (
+      <div className="panel table-wait">
+        <h3>選択を待っているよ</h3>
+        <p className="hint">カードの選択が終わると進みます。</p>
+      </div>
+    );
+  if (view.tableMoment?.stage === 'result' || view.tableMoment?.stage === 'announce')
+    return (
+      <div className="panel table-wait">
+        <h3>卓の様子を見届けよう</h3>
+        <p className="hint">
+          {view.tableMoment.stage === 'announce'
+            ? '宣言した行動を実行します。'
+            : '結果の演出が終わると、次の手番へ進みます。'}
+        </p>
+      </div>
+    );
   if (view.isSpectator) return <div className="panel spectate">観戦中。生存者たちの選択を見守りましょう。</div>;
-  if (!me || (!me.alive && !me.escaped)) return <div className="panel spectate">あなたは脱落しました。結末を見届けましょう…</div>;
+  if (!me || (!me.alive && !me.escaped))
+    return <div className="panel spectate">あなたは脱落しました。結末を見届けましょう…</div>;
   if (me.escaped) return <div className="panel spectate">あなたは脱出しました！</div>;
 
   switch (view.phase) {
@@ -460,14 +677,29 @@ function PhasePanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) 
 }
 
 /** 行動の確認シートに出す「何が起きるか」の明細。 */
-function actionConfirm(view: PublicGameState, action: ActionType, wood: number): { title: string; lines: ConfirmLine[]; danger?: boolean } {
+function actionConfirm(
+  view: PublicGameState,
+  action: ActionType,
+  wood: number,
+): { title: string; lines: ConfirmLine[]; danger?: boolean } {
   switch (action) {
     case 'fish':
       return {
         title: '釣りをしますか？',
         lines: [
-          { label: '引く玉', value: '1個（魚1〜3 か 不漁）' },
-          { label: '見込みの食料', value: '+1〜3（釣り竿を発動済みなら倍）', tone: 'good' },
+          {
+            label: '引く玉',
+            value: view.players.find((p) => p.isYou)?.permanents.includes('fishing_rod')
+              ? '2個を同時に引く'
+              : '1個（魚1〜3。黒玉も3匹）',
+          },
+          {
+            label: '見込みの食料',
+            value: view.players.find((p) => p.isYou)?.permanents.includes('fishing_rod')
+              ? '+2〜6（2玉の合計）'
+              : '+1〜3',
+            tone: 'good',
+          },
           { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
         ],
       };
@@ -483,7 +715,13 @@ function actionConfirm(view: PublicGameState, action: ActionType, wood: number):
       return {
         title: '難破船を漁りますか？',
         lines: [
-          { label: '引くカード', value: '1枚（中身は運まかせ）', tone: 'good' },
+          {
+            label: '引くカード',
+            value: view.players.find((p) => p.isYou)?.permanents.includes('duck_float')
+              ? '2枚から1枚選ぶ'
+              : '1枚（中身は運まかせ）',
+            tone: 'good',
+          },
           { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
         ],
       };
@@ -495,7 +733,9 @@ function actionConfirm(view: PublicGameState, action: ActionType, wood: number):
           { label: '確定でもらえる木', value: '1本（斧を発動済みなら2本）', tone: 'good' },
           { label: 'さらに引く', value: wood > 0 ? `${wood}本ぶん袋を引く` : 'なし（安全）' },
           ...(wood > 0
-            ? ([{ label: 'ヘビが出たら', value: '次ラウンド休み＋その回の木は全部失う', tone: 'danger' }] as ConfirmLine[])
+            ? ([
+                { label: 'ヘビが出たら', value: '次ラウンド休み＋追加分だけ失う（確定分は残る）', tone: 'danger' },
+              ] as ConfirmLine[])
             : []),
           { label: 'この手番', value: 'これで確定（他の行動は選べません）', tone: 'danger' },
         ],
@@ -510,7 +750,12 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
   if (me.resting) return <div className="panel">ヘビの毒で今ラウンドは動けません。</div>;
   if (!view.isYourTurn) {
     const actor = view.players.find((p) => p.id === view.currentActorId);
-    return <div className="panel"><h3>行動フェイズ</h3><p className="hint">{actor ? `${actor.name} の手番です…` : '進行中…'}</p></div>;
+    return (
+      <div className="panel">
+        <h3>行動フェイズ</h3>
+        <p className="hint">{actor ? `${actor.name} の手番です…` : '進行中…'}</p>
+      </div>
+    );
   }
   const commit = () => {
     if (!confirm) return;
@@ -518,38 +763,77 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
     api.choose(confirm.action, confirm.action === 'wood' ? confirm.wood : undefined);
     setConfirm(null);
   };
-  const ask = (action: ActionType, n = 0) => { playSound('click'); setConfirm({ action, wood: n }); };
+  const ask = (action: ActionType, n = 0) => {
+    if (action === 'wood' && n > 0) {
+      playSound('click');
+      setConfirm({ action, wood: n });
+    } else {
+      playSound(action);
+      api.choose(action, n);
+    }
+  };
   const meta = confirm ? actionConfirm(view, confirm.action, confirm.wood) : null;
   return (
     <div className="panel yourturn">
       <h3>あなたの番です — 行動を選ぶ</h3>
       <div className="action-grid">
         <div className="action-row3">
-          <button className="btn action" onClick={() => ask('fish')}><GameIcon name={ACTION_ICON.fish} size={34} /><span className="act-name">{ACTION_LABEL.fish}</span><span className="sub">袋から1玉・魚1〜3</span></button>
-          <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => ask('water')}><GameIcon name={ACTION_ICON.water} size={34} /><span className="act-name">{ACTION_LABEL.water}</span><span className="sub">{view.currentPrecip === 0 ? '今日は雨なし' : `水+${view.currentPrecip}`}</span></button>
-          <button className="btn action" onClick={() => ask('search')}><GameIcon name={ACTION_ICON.search} size={34} /><span className="act-name">{ACTION_LABEL.search}</span><span className="sub">カードを1枚引く</span></button>
+          <button className="btn action" onClick={() => ask('fish')}>
+            <GameIcon name={ACTION_ICON.fish} size={34} />
+            <span className="act-name">{ACTION_LABEL.fish}</span>
+            <span className="sub">{me.permanents.includes('fishing_rod') ? '2玉の合計・魚2〜6' : '1玉・魚1〜3'}</span>
+          </button>
+          <button className="btn action" disabled={view.currentPrecip === 0} onClick={() => ask('water')}>
+            <GameIcon name={ACTION_ICON.water} size={34} />
+            <span className="act-name">{ACTION_LABEL.water}</span>
+            <span className="sub">
+              {view.currentPrecip === 0
+                ? '今日は雨なし'
+                : `水+${view.currentPrecip * (me.permanents.includes('canteen') ? 2 : 1)}`}
+            </span>
+          </button>
+          <button className="btn action" disabled={view.wreckageRemaining === 0} onClick={() => ask('search')}>
+            <GameIcon name={ACTION_ICON.search} size={34} />
+            <span className="act-name">{ACTION_LABEL.search}</span>
+            <span className="sub">
+              {me.permanents.includes('duck_float') ? '2枚から1枚選ぶ' : 'カードを1枚引く'}・残り
+              {view.wreckageRemaining ?? '?'}枚
+            </span>
+          </button>
         </div>
         <div className="btn action wood-action">
           <div className="wood-head">
             <GameIcon name={ACTION_ICON.wood} size={40} />
-            <div className="wood-head-txt"><span className="act-name">{ACTION_LABEL.wood}</span><span className="sub">まず木1本（斧で2本）確定。さらに引くとヘビ（病気）の危険。</span></div>
+            <div className="wood-head-txt">
+              <span className="act-name">{ACTION_LABEL.wood}</span>
+              <span className="sub">まず木1本（斧で2本）確定。さらに引くとヘビ（病気）の危険。</span>
+            </div>
           </div>
           <div className="wood-push">
-            <label>さらに引く本数：{wood} 本（0〜5）<input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} /></label>
+            <label>
+              さらに引く本数：{wood} 本（0〜5）
+              <input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} />
+            </label>
             {/* 危険度メーター：数字だけだと「5本」の重さが伝わらないので玉の数で見せる */}
             <div className="risk-meter" aria-hidden>
               {Array.from({ length: 5 }, (_, i) => (
                 <span key={i} className={`risk-pip ${i < wood ? 'on' : ''}`} />
               ))}
               <span className={`risk-label ${wood >= 4 ? 'hot' : wood >= 2 ? 'warm' : ''}`}>
-                {wood === 0 ? '安全' : wood <= 2 ? 'ヘビの危険：小' : wood <= 4 ? 'ヘビの危険：中' : 'ヘビの危険：大'}
+                {wood === 0 ? '安全' : `ヘビの確率 ${Math.round((wood / 6) * 100)}%`}
               </span>
             </div>
-            <button className="btn primary" onClick={() => ask('wood', wood)}>{wood > 0 ? `1本＋${wood}本引く` : '木1本だけ取る'}</button>
+            <button className="btn primary" onClick={() => ask('wood', wood)}>
+              {wood > 0
+                ? `確定${me.permanents.includes('axe') ? 2 : 1}本＋${wood}本に挑戦`
+                : `木${me.permanents.includes('axe') ? 2 : 1}本を安全に取る`}
+            </button>
           </div>
         </div>
       </div>
-      <p className="hint">ヘビ（黒玉）に噛まれるのは<strong>木集めの追加引きだけ</strong>。出ると病気で次ラウンド休み＆追加分は無し。釣りの黒玉は「不漁」で病気にはなりません。</p>
+      <p className="hint">
+        ヘビに噛まれるのは<strong>木集めの追加引きだけ</strong>。釣りの黒玉は魚3匹で、病気にはなりません。
+      </p>
       {confirm && meta && (
         <ConfirmModal
           title={meta.title}
@@ -567,16 +851,37 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
 }
 
 function SurvivalPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
-  if (me.acted) return <div className="panel"><h3>生存チェック</h3><p className="hint">確定済み。他のプレイヤーを待っています…</p></div>;
+  if (me.acted)
+    return (
+      <div className="panel">
+        <h3>生存チェック</h3>
+        <p className="hint">確定済み。他のプレイヤーを待っています…</p>
+      </div>
+    );
   const waterShort = Math.max(0, view.seatsNeeded - view.water);
   const foodShort = Math.max(0, view.seatsNeeded - view.food);
   return (
     <div className="panel">
       <h3>生存チェック — 水→食料の順に消費</h3>
-      <p>生存者{view.seatsNeeded}人。水{view.water}・食料{view.food}。
-        {(waterShort > 0 || foodShort > 0) && <strong className="short"> 不足分は投票で犠牲が出ます。資源カードがあれば下から出せます。</strong>}</p>
+      <p>
+        生存者{view.seatsNeeded}人。水{view.water}・食料{view.food}。
+        {(waterShort > 0 || foodShort > 0) && (
+          <strong className="short">
+            {' '}
+            水{waterShort}・食料{foodShort}不足。手札から補うか、自分用に温存するかを決めよう。
+          </strong>
+        )}
+      </p>
       <div className="panel-actions">
-        <button className="btn primary" onClick={() => { playSound('click'); api.survivalPass(); }}>確定（これで消費へ）</button>
+        <button
+          className="btn primary"
+          onClick={() => {
+            playSound('click');
+            api.survivalPass();
+          }}
+        >
+          確定（これで消費へ）
+        </button>
       </div>
     </div>
   );
@@ -586,9 +891,31 @@ function VotePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   // 人を追放する＝取り返しがつかない操作なので、誰に入れるのかを確認シートで必ず見せる
   const [confirm, setConfirm] = useState<{ target: PublicPlayer | null } | null>(null);
   const reason = view.voteReason === 'water' ? '水不足' : view.voteReason === 'food' ? '食料不足' : 'ハリケーン';
-  if (me.sick) return <div className="panel danger"><h3>追放投票（{reason}）</h3><p className="hint">あなたは病気のため投票できません（対象にはなります）。</p></div>;
-  if (me.vote !== undefined) return <div className="panel danger"><h3>追放投票（{reason}）</h3><p className="hint">投票しました。集計を待っています…</p></div>;
-  const targets = view.players.filter((p) => p.alive && !p.escaped && p.id !== me.id);
+  if (me.sick)
+    return (
+      <div className="panel danger">
+        <h3>追放投票（{reason}）</h3>
+        <p className="hint">あなたは病気のため投票できません（対象にはなります）。</p>
+      </div>
+    );
+  if (me.vote !== undefined)
+    return (
+      <div className="panel danger">
+        <h3>追放投票（{reason}）</h3>
+        <p className="hint">投票しました。集計を待っています…</p>
+      </div>
+    );
+  if (
+    me.permanents.includes('crystal_ball') &&
+    view.players.some((p) => p.alive && !p.escaped && !p.sick && !p.permanents.includes('crystal_ball') && !p.hasVoted)
+  )
+    return (
+      <div className="panel">
+        <h3>水晶玉で最後に投票</h3>
+        <p>ほかの人の投票がそろうのを待っているよ。</p>
+      </div>
+    );
+  const targets = view.players.filter((p) => p.alive && !p.escaped && p.id !== me.id && p.id !== view.voteImmuneId);
   const commit = () => {
     if (!confirm) return;
     playSound('vote');
@@ -598,13 +925,46 @@ function VotePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   const t = confirm?.target ?? null;
   return (
     <div className="panel danger">
-      <h3>追放投票（{reason}）— 残り{view.pendingEliminations}人</h3>
+      <h3>
+        追放投票（{reason}）— 残り{view.pendingEliminations}人
+      </h3>
+      {me.permanents.includes('crystal_ball') && (
+        <p className="hint">
+          水晶玉：
+          {view.players
+            .filter((p) => p.hasVoted && p.id !== me.id)
+            .map((p) => `${p.name} → ${view.players.find((t) => t.id === p.vote)?.name ?? '棄権'}`)
+            .join(' ／ ')}
+        </p>
+      )}
       <p className="hint">誰を犠牲にする？（手札の資源カードで自分は自動的に救われます）</p>
       <div className="vote-grid">
         {targets.map((p) => (
-          <button key={p.id} className="btn vote" onClick={() => { playSound('click'); setConfirm({ target: p }); }}>{p.name}<span className="sub">手札{p.handCount}{p.sick ? '・病気' : ''}{p.votesReceived ? `・${p.votesReceived}票` : ''}</span></button>
+          <button
+            key={p.id}
+            className="btn vote"
+            onClick={() => {
+              playSound('click');
+              setConfirm({ target: p });
+            }}
+          >
+            {p.name}
+            <span className="sub">
+              手札{p.handCount}
+              {p.sick ? '・病気' : ''}
+              {p.votesReceived ? `・${p.votesReceived}票` : ''}
+            </span>
+          </button>
         ))}
-        <button className="btn ghost" onClick={() => { playSound('click'); setConfirm({ target: null }); }}>棄権</button>
+        <button
+          className="btn ghost"
+          onClick={() => {
+            playSound('click');
+            setConfirm({ target: null });
+          }}
+        >
+          棄権
+        </button>
       </div>
       {confirm && (
         <ConfirmModal
@@ -625,7 +985,11 @@ function VotePanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
                 ]
               : [
                   { label: 'あなたの票', value: '誰にも入りません' },
-                  { label: '今回の犠牲者', value: `あと ${view.pendingEliminations} 人（他の人の票で決まります）`, tone: 'danger' },
+                  {
+                    label: '今回の犠牲者',
+                    value: `あと ${view.pendingEliminations} 人（他の人の票で決まります）`,
+                    tone: 'danger',
+                  },
                 ]
           }
           confirmLabel={t ? `${t.name} に投票する` : '棄権する'}
@@ -647,10 +1011,28 @@ function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
   return (
     <div className="panel escape">
       <h3>脱出のチャンス！</h3>
-      <p>船{view.raftSeats}（生存{need}人）・航海の水食料も十分。今、出航する？</p>
+      <p>
+        船{view.raftSeats}（生存{need}人）・航海の水食料も十分。今、出航する？
+      </p>
       <div className="panel-actions">
-        <button className="btn ghost" onClick={() => { playSound('click'); api.escapeVote(false); }}>まだ残る</button>
-        <button className="btn primary" onClick={() => { playSound('click'); setConfirm(true); }}>出航する！</button>
+        <button
+          className="btn ghost"
+          onClick={() => {
+            playSound('click');
+            api.escapeVote(false);
+          }}
+        >
+          まだ残る
+        </button>
+        <button
+          className="btn primary"
+          onClick={() => {
+            playSound('click');
+            setConfirm(true);
+          }}
+        >
+          出航する！
+        </button>
       </div>
       {confirm && (
         <ConfirmModal
@@ -667,7 +1049,11 @@ function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
           confirmLabel="出航する"
           cancelLabel="やめる"
           onCancel={() => setConfirm(false)}
-          onConfirm={() => { playSound('escape'); api.escapeVote(true); setConfirm(false); }}
+          onConfirm={() => {
+            playSound('escape');
+            api.escapeVote(true);
+            setConfirm(false);
+          }}
         />
       )}
     </div>
@@ -676,7 +1062,7 @@ function EscapePanel({ view }: { view: PublicGameState; me: PublicPlayer }) {
 
 /** 自分の手札を画面上部に常時表示する帯。スマホでは横スクロール＋スティッキーで常に確認できる。 */
 function HandBar({ me, onSelect }: { me?: PublicPlayer; onSelect: (card: Card) => void }) {
-  const hand = me?.hand ?? [];
+  const hand = [...(me?.hand ?? []), ...(me?.equipment ?? [])];
   if (!me || !me.alive || me.escaped || hand.length === 0) return null;
   return (
     <div className="hand-bar">
@@ -684,9 +1070,20 @@ function HandBar({ me, onSelect }: { me?: PublicPlayer; onSelect: (card: Card) =
         {hand.map((c) => {
           const info = CARD_INFO[c.kind];
           return (
-            <button key={c.id} className={`card-chip cat-${info.cat}`} title={info.desc} onClick={() => { playSound('click'); onSelect(c); }}>
+            <button
+              key={c.id}
+              className={`card-chip cat-${info.cat} ${me.equipment?.some((x) => x.id === c.id) ? 'equipped' : ''}`}
+              title={info.desc}
+              onClick={() => {
+                playSound('click');
+                onSelect(c);
+              }}
+            >
               <GameIcon className="card-ic" name={c.kind} size={30} fallback={info.icon} />
-              <span className="card-nm">{info.name}</span>
+              <span className="card-nm">
+                {c.name ?? info.name}
+                {me.equipment?.some((x) => x.id === c.id) ? '（装備）' : ''}
+              </span>
             </button>
           );
         })}
@@ -697,41 +1094,50 @@ function HandBar({ me, onSelect }: { me?: PublicPlayer; onSelect: (card: Card) =
 
 /** 今そのカードが使えるか＋使えない理由（説明モーダル用）。 */
 function cardUsable(view: PublicGameState, me: PublicPlayer, c: Card): { ok: boolean; reason?: string } {
-  const k = c.kind;
-  const phase = view.phase;
-  const cat = CARD_INFO[k].cat;
-  if (me.sick && k !== 'serum') return { ok: false, reason: '病気の間はカードを使えません（血清を除く）。' };
-  if (cat === 'permanent' && k !== 'gun')
-    return phase === 'action'
+  const k = c.kind,
+    phase = view.phase;
+  const no = (reason: string) => ({ ok: false, reason });
+  if (view.pendingCard) return no('先にカードの選択を終えてね。');
+  if (!['action', 'survival', 'vote', 'escape'].includes(phase)) return no('今は使えません。');
+  if (me.resting || (me.sick && k !== 'serum')) return no('病気の間はカードを使えません（血清を除く）。');
+  if (CARD_INFO[k].cat === 'junk') return no('効果のない持ち物です。');
+  if (k === 'bullet' || k === 'hollow_bullet') return no('銃を選んで一緒に使います。');
+  if (k === 'tin_sheet' || k === 'concave_plate') return no('撃たれたとき、自動で防ぎます。');
+  if (k === 'serum') return me.sick ? { ok: true } : no('病気のときだけ使えます。');
+  if (k === 'fruit_basket' && phase !== 'survival') return no('生存チェック中に使えます。');
+  if (k === 'cannibal_bbq' && view.bodiesAvailable <= 0) return no('このラウンドに脱落者が出ると使えます。');
+  if (k === 'fish_tank' && view.water !== 0) return no('共有の水が0のとき使えます。');
+  if (k === 'cat' && view.food !== 0) return no('共有の食料が0のとき使えます。');
+  if (k === 'instant_noodles' && view.water < 2) return no('水が2必要です。');
+  if (k === 'food_mill' && view.food < 2) return no('食料が2必要です。');
+  if (k === 'shaman_kit' && view.currentPrecip !== 0) return no('降水量0の日に使えます。');
+  if (k === 'whetstone' && ![...(me.hand ?? []), ...(me.equipment ?? [])].some((x) => x.kind === 'axe'))
+    return no('斧が必要です。');
+  if (k === 'gun')
+    return (me.hand ?? []).some((x) => x.kind === 'bullet' || x.kind === 'hollow_bullet')
       ? { ok: true }
-      : { ok: false, reason: '自分の手番（行動フェイズ）で使うと発動し、以後ずっと効果が続きます。' };
-  if (cat === 'junk') return { ok: false, reason: '使えません。手札に残るので「カードを使わない＝何を持っているか怪しまれる」状況を作ります。' };
-  if (k === 'bullet') return { ok: false, reason: '銃と一緒に使います（単体では使えません）。' };
-  if (k === 'tin_sheet') return { ok: false, reason: '銃で撃たれた時に自動で1回だけ防ぎます（自分から使う必要はありません）。' };
-  if (cat === 'resource') {
-    if (k === 'fruit_basket')
-      return phase === 'survival' ? { ok: true } : { ok: false, reason: '不足の救済専用：生存チェック中だけ使えます（脱出の補給には使えません）。' };
-    if (phase === 'vote') return { ok: true };
-    return phase === 'survival' || phase === 'action'
-      ? { ok: true }
-      : { ok: false, reason: 'いまは使えません（行動/生存/投票フェイズで）。' };
-  }
-  if (k === 'serum') return me.sick ? { ok: true } : { ok: false, reason: '病気のときだけ使えます。' };
-  if (k === 'voodoo' || k === 'sleeping_pills' || k === 'alarm_clock' || k === 'telescope')
-    return phase === 'action' && view.isYourTurn ? { ok: true } : { ok: false, reason: '自分の手番（行動フェイズ）で使えます。' };
-  if (k === 'matches')
-    return phase === 'action' || phase === 'survival' || phase === 'vote'
-      ? { ok: true }
-      : { ok: false, reason: '汚れた水/腐った魚を使う前に使えます。' };
-  if (k === 'cannibal_bbq')
-    return (view.bodiesAvailable ?? 0) > 0 ? { ok: true } : { ok: false, reason: '脱落者（死体）がいる時だけ使えます。' };
-  if (k === 'conch')
-    return phase === 'vote' ? { ok: true } : { ok: false, reason: '追放投票が進行中のときに使えます。' };
-  if (k === 'gun') {
-    if (!(me.hand ?? []).some((x) => x.kind === 'bullet')) return { ok: false, reason: '弾が必要です。' };
-    return phase === 'action' || phase === 'vote' ? { ok: true } : { ok: false, reason: '行動フェイズか投票中に使えます。' };
-  }
-  return { ok: false };
+      : no('弾が必要です。');
+  if (me.equipment?.some((x) => x.id === c.id)) return no('すでに装備中。効果は続いています。');
+  if (
+    [
+      'coffee',
+      'barometer',
+      'pendulum',
+      'flashlight',
+      'voodoo',
+      'sleeping_pills',
+      'alarm_clock',
+      'telescope',
+      'metal_detector',
+      'whip',
+      'taser',
+      'whetstone',
+      'rum',
+    ].includes(k) ||
+    CARD_INFO[k].cat === 'permanent'
+  )
+    return phase === 'action' && view.isYourTurn ? { ok: true } : no('自分の行動の前に使えます。');
+  return { ok: true };
 }
 
 /** カードの効果説明＋「使う／やめる」確認。対象が要るカードはターゲット選択へ。 */
@@ -748,38 +1154,215 @@ function ItemModal({
   onClose: () => void;
   onUse: (card: Card, mode: 'gun' | 'voodoo' | 'telescope' | null) => void;
 }) {
-  const info = CARD_INFO[card.kind];
-  const u = cardUsable(view, me, card);
-  const targeted = card.kind === 'gun' || card.kind === 'voodoo' || card.kind === 'telescope';
+  const info = CARD_INFO[card.kind],
+    u = cardUsable(view, me, card);
+  const [target, setTarget] = useState('');
+  const [action, setAction] = useState<ActionType>('fish');
+  const [push, setPush] = useState(0);
+  const [item, setItem] = useState('');
+  const [hollow, setHollow] = useState(!(me.hand ?? []).some((c) => c.kind === 'bullet'));
+  const targeted = ['gun', 'voodoo', 'telescope', 'alarm_clock', 'pendulum', 'whip', 'taser', 'whetstone'].includes(
+    card.kind,
+  );
+  const alive = view.players.filter((p) => p.alive && !p.escaped);
+  const myIndex = alive.findIndex((p) => p.isYou);
+  const neighbors = [alive[(myIndex + 1) % alive.length]?.id, alive[(myIndex + alive.length - 1) % alive.length]?.id];
+  const targets = view.players.filter((p) =>
+    card.kind === 'voodoo'
+      ? !p.alive && !p.escaped
+      : p.alive &&
+        !p.escaped &&
+        (card.kind === 'alarm_clock' || !p.isYou) &&
+        (card.kind !== 'whetstone' || neighbors.includes(p.id)) &&
+        (card.kind !== 'taser' || !!p.equipment?.length),
+  );
+  const targetPlayer = targets.find((p) => p.id === target);
+  const valid = u.ok && (!targeted || !!targetPlayer) && (card.kind !== 'taser' || !!item);
+  const dangerous = card.kind === 'gun' || card.kind === 'whetstone';
   const use = () => {
-    if (!u.ok) return;
-    if (card.kind === 'gun') return onUse(card, 'gun');
-    if (card.kind === 'voodoo') return onUse(card, 'voodoo');
-    if (card.kind === 'telescope') return onUse(card, 'telescope');
+    if (!valid) return;
+    const options: CardOptions = { action, woodPush: push, targetCardId: item, useHollowBullet: hollow };
     playSound('click');
-    api.playCard(card.id);
+    api.playCard(card.id, target || undefined, options);
     onClose();
   };
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal item-modal" onClick={(e) => e.stopPropagation()}>
-        <div className={`item-ic cat-${info.cat}`}><GameIcon name={card.kind} size={56} fallback={info.icon} /></div>
-        <h3>{info.name}</h3>
+        <div className={`item-ic cat-${info.cat}`}>
+          <GameIcon name={card.kind} size={56} fallback={info.icon} />
+        </div>
+        <h3>
+          {card.name ?? info.name}
+          {card.expansion && <small className="expansion-tag">拡張</small>}
+        </h3>
         <p className="item-desc">{info.desc}</p>
-        {view.phase === 'vote' && info.cat === 'resource' && u.ok ? (
-          <p className="hint">今この投票で使うと、<strong>自分だけ</strong>追放を免れます（みんなの蓄えには入りません）。</p>
-        ) : info.cat === 'permanent' && card.kind !== 'gun' ? (
-          <p className="hint">使うと<strong>発動して公開</strong>され、以後ずっと効果が続きます。</p>
-        ) : (
-          <p className="hint">カードを使っても、このターンの行動（釣り・水汲み・木集め・探索）は別に行えます。</p>
+        {targeted && (
+          <label className="card-field">
+            相手を選ぶ
+            <select
+              aria-label="カードの対象"
+              value={target}
+              onChange={(e) => {
+                setTarget(e.target.value);
+                setItem('');
+              }}
+            >
+              <option value="">選んでね</option>
+              {targets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.isYou ? '（自分）' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
-        {!u.ok && u.reason && <p className="short">{u.reason}</p>}
+        {card.kind === 'pendulum' && (
+          <label className="card-field">
+            行わせる行動
+            <select value={action} onChange={(e) => setAction(e.target.value as ActionType)}>
+              {Object.entries(ACTION_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {(card.kind === 'whip' || (card.kind === 'pendulum' && action === 'wood')) && (
+          <label className="card-field">
+            追加で引く玉
+            <select value={push} onChange={(e) => setPush(Number(e.target.value))}>
+              {[0, 1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n}個{n > 0 ? `（ヘビの確率${Math.round((n / 6) * 100)}%）` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {card.kind === 'taser' && targetPlayer && (
+          <label className="card-field">
+            奪う装備
+            <select value={item} onChange={(e) => setItem(e.target.value)}>
+              <option value="">選んでね</option>
+              {targetPlayer.equipment?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {CARD_INFO[c.kind].name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {card.kind === 'gun' && (me.hand ?? []).some((c) => c.kind === 'hollow_bullet') && (
+          <label className="card-field">
+            使う弾
+            <select value={hollow ? 'hollow' : 'normal'} onChange={(e) => setHollow(e.target.value === 'hollow')}>
+              <option value="normal" disabled={!(me.hand ?? []).some((c) => c.kind === 'bullet')}>
+                通常弾
+              </option>
+              <option value="hollow">ダムダム弾（防具を貫く）</option>
+            </select>
+          </label>
+        )}
+        {dangerous && targetPlayer && (
+          <p className="short">{targetPlayer.name} を攻撃する。死亡すると取り消せないよ。</p>
+        )}
+        {view.phase === 'vote' &&
+          ['water_bottle', 'coconut', 'dirty_water', 'sandwich', 'sardine_can', 'rotten_fish'].includes(card.kind) && (
+            <p className="hint">投票中は自分の配給として使い、追放から身を守ります。</p>
+          )}
+        {!u.ok && <p className="short">{u.reason}</p>}
         <div className="panel-actions">
-          <button className="btn ghost" onClick={onClose}>やめる</button>
-          <button className="btn primary" disabled={!u.ok} onClick={use}>
-            {targeted ? '使う（相手を選ぶ）' : '使う'}
+          <button className="btn ghost" onClick={onClose}>
+            やめる
+          </button>
+          <button className={`btn ${dangerous ? 'danger' : 'primary'}`} disabled={!valid} onClick={use}>
+            {dangerous && targetPlayer ? `${targetPlayer.name} を攻撃する` : '使う'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CardDecisionPanel({ view, me }: { view: PublicGameState; me?: PublicPlayer }) {
+  const d = view.pendingCard!;
+  const owner = view.players.find((p) => p.id === d.playerId);
+  if (d.playerId !== view.youId)
+    return (
+      <div className="banner">
+        {owner?.name} が{d.kind === 'tie' ? '同票を裁定' : d.kind === 'rum' ? '渡す手札を選択' : 'カードを選択'}している
+      </div>
+    );
+  const cards = d.kind === 'search' ? d.cards : me?.hand;
+  return (
+    <div className="overlay">
+      <div className="modal item-modal decision-modal">
+        <h3>
+          {d.kind === 'tie'
+            ? '親として同票を裁定'
+            : d.kind === 'rum'
+              ? '左隣に渡すカードを1枚選ぶ'
+              : '手に入れるカードを1枚選ぶ'}
+        </h3>
+        <p className="hint">
+          {d.kind === 'search'
+            ? '選ばなかったカードは捨てます。中身はあなたにだけ見えています。'
+            : d.kind === 'tie'
+              ? '最多票の候補から選びます。'
+              : 'ラム酒の効果：親から順に1枚ずつ渡します。'}
+        </p>
+        <div className="decision-choices">
+          {d.kind === 'tie'
+            ? d.targetIds?.map((id) => (
+                <button key={id} className="btn danger" onClick={() => api.resolveCard(id)}>
+                  {view.players.find((p) => p.id === id)?.name}
+                </button>
+              ))
+            : cards?.map((c) => (
+                <button className="decision-card" key={c.id} onClick={() => api.resolveCard(c.id)}>
+                  <GameIcon name={c.kind} size={46} />
+                  <strong>{c.name ?? CARD_INFO[c.kind].name}</strong>
+                  <span>{CARD_INFO[c.kind].desc}</span>
+                </button>
+              ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrivatePreview({ preview }: { preview: PublicGameState['privatePreview'] }) {
+  const [closed, setClosed] = useState(false);
+  const key = JSON.stringify(preview);
+  useEffect(() => setClosed(false), [key]);
+  if (!preview || closed) return null;
+  return (
+    <div className="overlay" onClick={() => setClosed(true)}>
+      <div className="modal item-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>{preview.title}</h3>
+        <div className="decision-choices">
+          {preview.cards?.map((c) => (
+            <div className="decision-card" key={c.id}>
+              <GameIcon name={c.kind} size={42} />
+              <strong>{c.name ?? CARD_INFO[c.kind].name}</strong>
+              <span>{CARD_INFO[c.kind].desc}</span>
+            </div>
+          ))}
+          {preview.weather?.map((w, i) => (
+            <div className="decision-card" key={i}>
+              <GameIcon name={w.hurricane ? 'wx-hurricane' : w.precip ? 'wx-rain' : 'wx-sun'} size={46} />
+              <strong>
+                {i + 1}枚目：{w.hurricane ? 'ハリケーン' : `降水量${w.precip}`}
+              </strong>
+            </div>
+          ))}
+        </div>
+        <button className="btn primary block" onClick={() => setClosed(true)}>
+          閉じる
+        </button>
       </div>
     </div>
   );
@@ -800,7 +1383,10 @@ function PeekModal({ peek }: { peek: PublicGameState['peek'] }) {
   return (
     <div className="overlay" onClick={() => setClosed(true)}>
       <div className="modal item-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="with-ic"><GameIcon name="telescope" size={26} />{peek.targetName} の手札</h3>
+        <h3 className="with-ic">
+          <GameIcon name="telescope" size={26} />
+          {peek.targetName} の手札
+        </h3>
         <div className="hand-cards" style={{ justifyContent: 'center' }}>
           {peek.hand.length === 0 && <p className="hint">手札なし</p>}
           {peek.hand.map((c) => {
@@ -813,7 +1399,9 @@ function PeekModal({ peek }: { peek: PublicGameState['peek'] }) {
             );
           })}
         </div>
-        <button className="btn primary block" onClick={() => setClosed(true)}>閉じる</button>
+        <button className="btn primary block" onClick={() => setClosed(true)}>
+          閉じる
+        </button>
       </div>
     </div>
   );
@@ -823,23 +1411,40 @@ function LogPanel({ view }: { view: PublicGameState }) {
   const entries = [...view.log].reverse();
   return (
     <div className="log">
-      <h3>記録</h3>
+      <h3 className="with-ic">
+        <UiIcon name="log" size={18} />
+        記録
+      </h3>
       <ul>
         {entries.map((e) => (
-          <li key={e.id} className={KIND_CLASS[e.kind ?? 'info']}><span className="log-day">R{e.round}</span> {shipText(e.text)}</li>
+          <li key={e.id} className={KIND_CLASS[e.kind ?? 'info']}>
+            <span className="log-day">R{e.round}</span> {shipText(e.text)}
+          </li>
         ))}
       </ul>
     </div>
   );
 }
 
-const QUICK_PHRASES = ['協力しよう', '水ちょうだい', '食料ちょうだい', '君が怪しい', '俺じゃない！', '取引しよう', '出航しよう', 'まだ待って', 'ナイス！'];
+const QUICK_PHRASES = [
+  '協力しよう',
+  '水ちょうだい',
+  '食料ちょうだい',
+  '君が怪しい',
+  '俺じゃない！',
+  '取引しよう',
+  '出航しよう',
+  'まだ待って',
+  'ナイス！',
+];
 
 function Chat({ view, chat, onSay }: { view: PublicGameState; chat: ChatMessage[]; onSay: (t: string) => void }) {
   const [text, setText] = useState('');
   const [to, setTo] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [chat.length]);
+  useEffect(() => {
+    ref.current?.scrollTo({ top: ref.current.scrollHeight });
+  }, [chat.length]);
   const me = view.players.find((p) => p.isYou);
   const targets = view.players.filter((p) => p.alive && !p.escaped && p.id !== me?.id);
   const prefix = to ? `＞${to} ` : '';
@@ -855,27 +1460,48 @@ function Chat({ view, chat, onSay }: { view: PublicGameState; chat: ChatMessage[
   };
   return (
     <div className="chat">
-      <h3>議論チャット</h3>
+      <h3 className="with-ic">
+        <UiIcon name="chat" size={18} />
+        議論チャット
+      </h3>
       <div className="chat-list" ref={ref}>
         {chat.length === 0 && <p className="hint">まだ発言はありません。下の定型文でサッと話せます。</p>}
         {chat.map((m) => (
-          <div key={m.id} className={`chat-msg ${m.isSpectator ? 'spec' : ''}`}><span className="chat-name">{m.isSpectator && <UiIcon name="eye" size={13} className="spec-ic" />}{m.name}</span><span className="chat-text">{m.text}</span></div>
+          <div key={m.id} className={`chat-msg ${m.isSpectator ? 'spec' : ''}`}>
+            <span className="chat-name">
+              {m.isSpectator && <UiIcon name="eye" size={13} className="spec-ic" />}
+              {m.name}
+            </span>
+            <span className="chat-text">{m.text}</span>
+          </div>
         ))}
       </div>
       <div className="quick-row">
         <select className="quick-to" value={to} onChange={(e) => setTo(e.target.value)} title="宛先">
           <option value="">宛先なし</option>
           {targets.map((p) => (
-            <option key={p.id} value={p.name}>＞{p.name}</option>
+            <option key={p.id} value={p.name}>
+              ＞{p.name}
+            </option>
           ))}
         </select>
         {QUICK_PHRASES.map((q) => (
-          <button key={q} className="quick-chip" onClick={() => sendRaw(q)}>{q}</button>
+          <button key={q} className="quick-chip" onClick={() => sendRaw(q)}>
+            {q}
+          </button>
         ))}
       </div>
       <div className="chat-input">
-        <input value={text} maxLength={200} placeholder={view.isSpectator ? '観戦者として発言' : prefix ? `${prefix}…` : 'メッセージ…'} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} />
-        <button className="btn small" onClick={send}>送信</button>
+        <input
+          value={text}
+          maxLength={200}
+          placeholder={view.isSpectator ? '観戦者として発言' : prefix ? `${prefix}…` : 'メッセージ…'}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && send()}
+        />
+        <button className="btn small" onClick={send}>
+          送信
+        </button>
       </div>
     </div>
   );
@@ -892,9 +1518,15 @@ function RoundSplash({ view }: { view: PublicGameState }) {
     setShow(true);
     const id = window.setTimeout(() => setShow(false), 1900);
     return () => window.clearTimeout(id);
-  }, [view.round, view.phase]);
+  }, [view.round]);
   if (!show) return null;
-  const wxName = view.hurricaneRevealed ? 'wx-hurricane' : view.currentPrecip === 0 ? 'wx-sun' : view.currentPrecip >= 3 ? 'wx-storm' : 'wx-rain';
+  const wxName = view.hurricaneRevealed
+    ? 'wx-hurricane'
+    : view.currentPrecip === 0
+      ? 'wx-sun'
+      : view.currentPrecip >= 3
+        ? 'wx-storm'
+        : 'wx-rain';
   const wClass = view.hurricaneRevealed ? 'storm' : view.currentPrecip === 0 ? 'sun' : 'rain';
   return (
     <div className="weather-reveal" aria-hidden>
@@ -917,7 +1549,15 @@ function WeatherFX({ view }: { view: PublicGameState }) {
   return <div className="wfx wfx-sun" aria-hidden />;
 }
 
-interface Flight { key: string; icon: string; x: number; y: number; dx: number; dy: number; delay: number }
+interface Flight {
+  key: string;
+  icon: string;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  delay: number;
+}
 /** 飛ぶトークンの絵柄（icons.tsx のキー）。 */
 const GAIN_ICON: Record<string, string> = { food: 'fish', water: 'water', wood: 'wood', card: 'card' };
 
@@ -927,7 +1567,12 @@ function FlyLayer({ view }: { view: PublicGameState }) {
   // マウント時点の lastGain は「過去の獲得」なので再生しない（再接続/リロード対策）。
   const seen = useRef(view.lastGain?.id ?? -1);
   const timers = useRef<number[]>([]);
-  useEffect(() => () => { timers.current.forEach((id) => window.clearTimeout(id)); }, []);
+  useEffect(
+    () => () => {
+      timers.current.forEach((id) => window.clearTimeout(id));
+    },
+    [],
+  );
   const g = view.lastGain;
   useEffect(() => {
     if (!g || g.id === seen.current) return;
@@ -944,7 +1589,8 @@ function FlyLayer({ view }: { view: PublicGameState }) {
       src = { x: window.innerWidth / 2, y: 84 };
       tgt = centerOf(pcard);
     } else {
-      const sel = g.kind === 'food' ? '[data-fly="food"]' : g.kind === 'water' ? '[data-fly="water"]' : '[data-fly="raft"]';
+      const sel =
+        g.kind === 'food' ? '[data-fly="food"]' : g.kind === 'water' ? '[data-fly="water"]' : '[data-fly="raft"]';
       src = centerOf(pcard) ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
       tgt = centerOf(document.querySelector(sel));
     }
@@ -978,7 +1624,9 @@ function FlyLayer({ view }: { view: PublicGameState }) {
           '--fdy': `${f.dy}px`,
         };
         return (
-          <span key={f.key} className="fly-token" style={style as CSSProperties}><GameIcon name={f.icon} size={28} /></span>
+          <span key={f.key} className="fly-token" style={style as CSSProperties}>
+            <GameIcon name={f.icon} size={28} />
+          </span>
         );
       })}
     </div>
@@ -998,13 +1646,25 @@ const EV_META: Record<string, { ic: string; cls: string }> = {
 function EventFX({ view }: { view: PublicGameState }) {
   const e = [...view.log]
     .reverse()
-    .find((x) => x.kind === 'death' || x.kind === 'escape' || x.kind === 'snake' || x.text.includes('ハリケーン') || x.text.includes('船に乗れる') || x.text.includes('座席が'));
+    .find(
+      (x) =>
+        x.kind === 'death' ||
+        x.kind === 'escape' ||
+        x.kind === 'snake' ||
+        x.text.includes('ハリケーン') ||
+        x.text.includes('船に乗れる') ||
+        x.text.includes('座席が'),
+    );
   const [cur, setCur] = useState<{ id: number; kind: string; text: string } | null>(null);
   const seen = useRef(-1);
   useEffect(() => {
     if (!e || e.id === seen.current) return;
     seen.current = e.id;
-    const kind = e.text.includes('ハリケーン') ? 'hurricane' : e.text.includes('船に乗れる') || e.text.includes('座席が') ? 'seat' : (e.kind ?? 'info');
+    const kind = e.text.includes('ハリケーン')
+      ? 'hurricane'
+      : e.text.includes('船に乗れる') || e.text.includes('座席が')
+        ? 'seat'
+        : (e.kind ?? 'info');
     setCur({ id: e.id, kind, text: e.text });
     if (kind === 'death' || kind === 'snake' || kind === 'hurricane') {
       document.documentElement.classList.add('fx-shake');
@@ -1040,22 +1700,47 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
   const sole = view.config.soleSurvivor;
   const youWon = sole ? !!me?.escaped && escaped.length === 1 : !!me?.escaped;
   const headline = sole
-    ? escaped.length === 1 ? `単独生存：${escaped[0].name}` : escaped.length > 0 ? '脱出者あり（単独生存なし）' : '全滅'
-    : escaped.length > 0 ? '脱出成功' : '全滅';
-  const verdict = !me ? null : youWon ? (sole ? '単独生存、あなたの勝利！' : 'あなたは生き延びた！') : me.escaped ? '脱出したが独り占めできず…' : 'あなたは島に消えた…';
+    ? escaped.length === 1
+      ? `単独生存：${escaped[0].name}`
+      : escaped.length > 0
+        ? '脱出者あり（単独生存なし）'
+        : '全滅'
+    : escaped.length > 0
+      ? '脱出成功'
+      : '全滅';
+  const verdict = !me
+    ? null
+    : youWon
+      ? sole
+        ? '単独生存、あなたの勝利！'
+        : 'あなたは生き延びた！'
+      : me.escaped
+        ? '脱出したが独り占めできず…'
+        : 'あなたは島に消えた…';
   const line = (p: PublicPlayer) => (
-    <li key={p.id}>{p.name}{p.persona && <span className="reveal">（{PERSONA_INFO[p.persona].label}）</span>}</li>
+    <li key={p.id}>
+      {p.name}
+      {p.persona && <span className="reveal">（{PERSONA_INFO[p.persona].label}）</span>}
+    </li>
   );
   // 結末の大きな挿絵（全員脱出/全滅、または自分の生死）。未提供のキーは近い絵にフォールバック。
   const allEscaped = escaped.length > 0 && dead.length === 0;
   const allDead = escaped.length === 0;
-  const artKey = allEscaped ? 'res-all-survived'
-    : allDead ? 'res-all-dead'
-    : view.isSpectator ? (escaped.length > 0 ? 'res-all-survived' : 'res-all-dead')
-    : me?.escaped ? 'res-survived' : 'res-died';
-  const artUrl = ART[artKey]
-    ?? (artKey === 'res-died' ? ART['res-all-dead'] : undefined)
-    ?? (artKey === 'res-survived' ? ART['res-all-survived'] : undefined);
+  const artKey = allEscaped
+    ? 'res-all-survived'
+    : allDead
+      ? 'res-all-dead'
+      : view.isSpectator
+        ? escaped.length > 0
+          ? 'res-all-survived'
+          : 'res-all-dead'
+        : me?.escaped
+          ? 'res-survived'
+          : 'res-died';
+  const artUrl =
+    ART[artKey] ??
+    (artKey === 'res-died' ? ART['res-all-dead'] : undefined) ??
+    (artKey === 'res-survived' ? ART['res-all-survived'] : undefined);
   return (
     <div className="overlay">
       <div className={`result ${view.isSpectator ? '' : youWon ? 'win' : 'lose'}`}>
@@ -1065,19 +1750,41 @@ function GameOver({ view, me, onLeave }: { view: PublicGameState; me?: PublicPla
         {!view.isSpectator && verdict && <p className={`verdict ${youWon ? 'win' : 'lose'}`}>{verdict}</p>}
         {view.isSpectator && <p className="verdict">観戦お疲れさまでした。</p>}
         <div className="result-cols">
-          <div><h4>脱出（{escaped.length}）</h4><ul>{escaped.map((p) => line(p))}{escaped.length === 0 && <li className="hint">なし</li>}</ul></div>
-          <div><h4>島に消えた（{dead.length}）</h4><ul>{dead.map((p) => line(p))}{dead.length === 0 && <li className="hint">なし</li>}</ul></div>
+          <div>
+            <h4>脱出（{escaped.length}）</h4>
+            <ul>
+              {escaped.map((p) => line(p))}
+              {escaped.length === 0 && <li className="hint">なし</li>}
+            </ul>
+          </div>
+          <div>
+            <h4>島に消えた（{dead.length}）</h4>
+            <ul>
+              {dead.map((p) => line(p))}
+              {dead.length === 0 && <li className="hint">なし</li>}
+            </ul>
+          </div>
         </div>
         <p className="hint">（カッコ内はAIの正体＝性格）</p>
         {/* 6人戦だと縦に長くなるので、この導線は結果カードの下端に貼り付けて必ず届くようにする */}
-        <button className="btn primary block result-cta" onClick={onLeave}>新しいゲームへ</button>
+        <button className="btn primary block result-cta" onClick={onLeave}>
+          新しいゲームへ
+        </button>
       </div>
     </div>
   );
 }
 
 function phaseLabel(v: PublicGameState): string {
-  const m: Record<string, string> = { lobby: 'ロビー', weather: '天候', action: '行動', survival: '生存チェック', vote: '追放投票', escape: '脱出', gameover: '結末' };
+  const m: Record<string, string> = {
+    lobby: 'ロビー',
+    weather: '天候',
+    action: '行動',
+    survival: '生存チェック',
+    vote: '追放投票',
+    escape: '脱出',
+    gameover: '結末',
+  };
   return m[v.phase] ?? v.phase;
 }
 function useCountdown(deadlineAt?: number): number | null {

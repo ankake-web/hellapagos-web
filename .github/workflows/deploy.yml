@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate rules and progression
+        run: npm run typecheck && npm test
+
       - name: Build client
         run: npm run build
         env:

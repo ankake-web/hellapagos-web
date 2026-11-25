@@ -1,3 +1,4 @@
+import { actionResult, actionSpeech, presentationTiming, type TableMoment } from '@hellapagos/shared';
 import type { Server } from 'socket.io';
 import { recordResult } from './leaderboard.js';
 import { botSpeak, llmEnabled, type SpeakCtx } from './llm.js';
@@ -10,12 +11,17 @@ import {
   Rng,
   addPlayer,
   aiAction,
+  aiExtraPlays,
+  aiCardDecision,
+  resolveCardDecision,
+  type CardOptions,
   aiBeforeAction,
   aiChatLine,
   aiConchPlays,
   aiEscape,
   aiSurvivalPlays,
   aiVote,
+  hasPermanent,
   alivePlayers,
   randomName,
   scriptedNegotiation,
@@ -76,6 +82,9 @@ interface ServerRoom {
   // 演出の「ため」：蛇/死亡/脱出/ハリケーンの直後に少し止めて見せる
   holdUntil?: number;
   holdTimer?: ReturnType<typeof setTimeout>;
+  tableMoment?: TableMoment;
+  presentedRound?: number;
+  deadlineKey?: string;
   lastDramaId?: number; // 直近で「ため」を入れた劇的ログのid
 }
 
@@ -211,7 +220,10 @@ export class RoomManager {
       this.broadcast(room);
     }
   }
-  setRoomConfig(socketId: string, p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number }): void {
+  setRoomConfig(
+    socketId: string,
+    p: { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number },
+  ): void {
     const { room, playerId } = this.ctx(socketId);
     this.assertHost(room, playerId);
     room.state = setConfig(room.state, p);
@@ -230,12 +242,47 @@ export class RoomManager {
   submitAction(socketId: string, action: ActionType, woodPush = 0): void {
     const { room, playerId } = this.ctx(socketId);
     if (currentActorId(room.state) !== playerId) return;
-    room.state = takeAction(room.state, playerId, action, woodPush);
+    if (room.holdUntil && Date.now() < room.holdUntil) return;
+    const before = room.state;
+    room.state = takeAction(before, playerId, action, woodPush);
+    if (room.state !== before) {
+      const until = Date.now() + presentationTiming(before.config.speed).result;
+      room.tableMoment = {
+        id: Date.now(),
+        stage: 'result',
+        playerId: playerId,
+        action,
+        ...actionResult(before, room.state, playerId, action),
+        until,
+      };
+      room.holdUntil = until;
+    }
     this.drive(room);
   }
-  submitCard(socketId: string, cardId: string, targetId?: string | null): void {
+  resolveCard(socketId: string, choiceId: string): void {
     const { room, playerId } = this.ctx(socketId);
-    room.state = playCard(room.state, playerId, cardId, targetId ?? undefined);
+    room.state = resolveCardDecision(room.state, playerId, choiceId);
+    this.drive(room);
+  }
+  submitCard(socketId: string, cardId: string, targetId?: string | null, options?: CardOptions): void {
+    const { room, playerId } = this.ctx(socketId);
+    const before = room.state;
+    const owner = before.players.find((p) => p.id === playerId);
+    const card = [...(owner?.hand ?? []), ...(owner?.equipment ?? [])].find((c) => c.id === cardId);
+    room.state = playCard(before, playerId, cardId, targetId ?? undefined, options);
+    if (card && room.state !== before) {
+      const until = Date.now() + presentationTiming(before.config.speed).announce;
+      room.tableMoment = {
+        id: Date.now(),
+        stage: 'result',
+        playerId: playerId,
+        cardKind: card.kind,
+        title: CARD_INFO[card.kind].name + 'を使った',
+        detail: room.state.log.at(-1)?.text ?? '',
+        until,
+      };
+      room.holdUntil = Math.max(room.holdUntil ?? 0, until);
+    }
     this.drive(room);
   }
   submitSurvivalPass(socketId: string): void {
@@ -275,7 +322,8 @@ export class RoomManager {
     if (room.state.phase === 'lobby') {
       room.state = removePlayer(room.state, idx.playerId);
       if (room.state.players.length === 0) return this.closeRoom(room);
-      if (idx.playerId === room.hostId) room.hostId = (room.state.players.find((p) => !p.isBot) ?? room.state.players[0]).id;
+      if (idx.playerId === room.hostId)
+        room.hostId = (room.state.players.find((p) => !p.isBot) ?? room.state.players[0]).id;
       this.broadcast(room);
     } else {
       room.state = setConnected(room.state, idx.playerId, false);
@@ -289,7 +337,41 @@ export class RoomManager {
     while (guard++ < 4000) {
       const s = room.state;
       const aw = awaiting(s);
-
+      const deadlineKey = [
+        s.round,
+        s.phase,
+        currentActorId(s),
+        s.voteReason,
+        s.pendingEliminations,
+        s.pendingCard?.playerId,
+        s.pendingCard?.kind,
+      ].join('|');
+      if (room.deadlineKey !== deadlineKey) {
+        if (room.deadline) clearTimeout(room.deadline);
+        room.deadline = undefined;
+        room.deadlineAt = undefined;
+        room.deadlineKey = deadlineKey;
+      }
+      // 天候を見せ終えるまで、最初のCPUも裏で行動しない。
+      if (s.round > 0 && s.phase !== 'gameover' && room.presentedRound !== s.round) {
+        room.presentedRound = s.round;
+        room.holdUntil = Date.now() + presentationTiming(s.config.speed).round;
+      }
+      const dId = latestDramaId(s);
+      if (dId > (room.lastDramaId ?? -1)) {
+        room.lastDramaId = dId;
+        room.holdUntil = Math.max(room.holdUntil ?? 0, Date.now() + DRAMA_HOLD_MS);
+      }
+      if (room.holdUntil && Date.now() < room.holdUntil) {
+        if (room.deadline) clearTimeout(room.deadline);
+        room.deadline = undefined;
+        room.deadlineAt = undefined;
+        this.broadcast(room);
+        this.scheduleHold(room, room.holdUntil - Date.now());
+        return;
+      }
+      room.holdUntil = undefined;
+      if (room.tableMoment?.stage === 'result') room.tableMoment = undefined;
       if (aw === null) {
         this.clearTimers(room);
         this.recordIfGameOver(room);
@@ -297,18 +379,24 @@ export class RoomManager {
         return;
       }
 
-      // 劇的イベント（蛇・死亡・脱出・ハリケーン）の直後は少し止めて、演出を見せる。
-      const dId = latestDramaId(s);
-      if (dId > (room.lastDramaId ?? -1)) {
-        room.lastDramaId = dId;
-        room.holdUntil = Date.now() + DRAMA_HOLD_MS;
-      }
-      if (room.holdUntil && Date.now() < room.holdUntil) {
+      if (aw === 'card') {
+        const p = s.players.find((p) => p.id === s.pendingCard!.playerId);
+        if (!p) return;
+        const choose = () => {
+          const id = aiCardDecision(room.state);
+          if (id) room.state = resolveCardDecision(room.state, p.id, id);
+        };
+        if (this.isAuto(p)) {
+          if (!room.botTimer)
+            room.botTimer = setTimeout(() => {
+              room.botTimer = undefined;
+              choose();
+              this.drive(room);
+            }, presentationTiming(s.config.speed).announce);
+        } else this.ensureDeadline(room, 'card', choose);
         this.broadcast(room);
-        this.scheduleHold(room, room.holdUntil - Date.now());
         return;
       }
-
       if (aw === 'action') {
         const actorId = currentActorId(s);
         const actor = actorId ? s.players.find((p) => p.id === actorId) : undefined;
@@ -360,7 +448,7 @@ export class RoomManager {
           for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && x.botPersona === 'sniper')) {
             if (awaiting(room.state) !== 'vote') break;
             const cur = this.live(room, p.id);
-            const gun = cur?.hand.find((c) => c.kind === 'gun');
+            const gun = [...(cur?.hand ?? []), ...(cur?.equipment ?? [])].find((c) => c.kind === 'gun');
             const bullet = cur?.hand.find((c) => c.kind === 'bullet');
             const r = rngFor(room.state, p.id.charCodeAt(0) + 9);
             if (gun && bullet && r.chance(0.6)) {
@@ -378,7 +466,9 @@ export class RoomManager {
         const past = !useNeg || Date.now() >= room.negotiateUntil;
         if (past) {
           // ボットの投票を確定（LLMの意図があれば優先、無ければヒューリスティック）
-          for (const p of alivePlayers(room.state).filter((x) => this.isAuto(x) && !x.sick && x.vote === undefined)) {
+          for (const p of alivePlayers(room.state)
+            .filter((x) => this.isAuto(x) && !x.sick && x.vote === undefined)
+            .sort((a, b) => Number(hasPermanent(a, 'crystal_ball')) - Number(hasPermanent(b, 'crystal_ball')))) {
             const intent = this.intentTarget(room, p.id);
             const r = rngFor(room.state, p.id.charCodeAt(p.id.length - 1));
             room.state = castVote(room.state, p.id, intent ?? aiVote(room.state, this.live(room, p.id)!, r));
@@ -437,33 +527,77 @@ export class RoomManager {
   }
 
   private scheduleBotAction(room: ServerRoom, botId: string): void {
-    const [lo, hi] = thinkDelayRange(room.state.config.speed);
+    const timing = presentationTiming(room.state.config.speed);
     const r = rngFor(room.state, botId.charCodeAt(botId.length - 1));
-    const delay = lo + Math.floor(r.next() * (hi - lo));
+    const delay = timing.think[0] + Math.floor(r.next() * (timing.think[1] - timing.think[0]));
+    room.tableMoment = {
+      id: Date.now(),
+      stage: 'thinking',
+      playerId: botId,
+      title: '考え中',
+      detail: '島の様子を見ながら、行動を選んでいる。',
+      until: Date.now() + delay,
+    };
     room.botTimer = setTimeout(() => {
       room.botTimer = undefined;
+
       let bot = this.live(room, botId);
       if (!bot || currentActorId(room.state) !== botId) {
+        room.tableMoment = undefined;
         this.drive(room);
         return;
       }
-      // 手番前に使うカード（永続の発動・人肉BBQ等）を先に処理する
       for (const id of aiBeforeAction(room.state, bot)) room.state = playCard(room.state, botId, id);
+      for (const use of aiExtraPlays(room.state, this.live(room, botId)!)) {
+        room.state = playCard(room.state, botId, use.cardId, use.targetId, use.options);
+        if (room.state.pendingCard) {
+          room.tableMoment = undefined;
+          this.drive(room);
+          return;
+        }
+      }
       bot = this.live(room, botId)!;
       const decision = aiAction(room.state, bot, rngFor(room.state, botId.length));
-      // たまにセリフ
-      if (bot.botPersona && r.chance(0.25)) {
-        const line = aiChatLine(bot, r);
-        if (line) this.postChat(room, bot.name, line, false);
-      }
-      room.state = takeAction(room.state, botId, decision.action, decision.woodPush);
-      // 噛まれたら血清で治す（手番を失わないため）
-      const after = this.live(room, botId);
-      if (after?.sick) {
-        const serum = after.hand.find((c) => c.kind === 'serum');
-        if (serum) room.state = playCard(room.state, botId, serum.id);
-      }
-      this.drive(room);
+      const speech = actionSpeech(room.state, bot, decision.action, decision.woodPush);
+      room.tableMoment = {
+        id: Date.now(),
+        stage: 'announce',
+        playerId: botId,
+        action: decision.action,
+        title: speech,
+        detail: '行動を宣言',
+        until: Date.now() + timing.announce,
+      };
+      this.postChat(room, bot.name, speech, false);
+      this.broadcast(room);
+      room.botTimer = setTimeout(() => {
+        room.botTimer = undefined;
+
+        if (currentActorId(room.state) !== botId) {
+          room.tableMoment = undefined;
+          this.drive(room);
+          return;
+        }
+        const before = room.state;
+        room.state = takeAction(before, botId, decision.action, decision.woodPush);
+        const after = this.live(room, botId);
+        if (after?.sick) {
+          const serum = after.hand.find((c) => c.kind === 'serum');
+          if (serum) room.state = playCard(room.state, botId, serum.id);
+        }
+        const result = actionResult(before, room.state, botId, decision.action);
+        const until = Date.now() + timing.result;
+        room.tableMoment = {
+          id: Date.now(),
+          stage: 'result',
+          playerId: botId,
+          action: decision.action,
+          ...result,
+          until,
+        };
+        room.holdUntil = until;
+        this.drive(room);
+      }, timing.announce);
     }, delay);
   }
 
@@ -490,18 +624,24 @@ export class RoomManager {
   }
   private scheduleRedrive(room: ServerRoom, ms: number): void {
     if (room.negTimer) return;
-    room.negTimer = setTimeout(() => {
-      room.negTimer = undefined;
-      this.drive(room);
-    }, Math.max(300, ms));
+    room.negTimer = setTimeout(
+      () => {
+        room.negTimer = undefined;
+        this.drive(room);
+      },
+      Math.max(300, ms),
+    );
   }
   /** 演出ホールド：劇的イベントの直後に少しだけ進行を止める。 */
   private scheduleHold(room: ServerRoom, ms: number): void {
     if (room.holdTimer) return;
-    room.holdTimer = setTimeout(() => {
-      room.holdTimer = undefined;
-      this.drive(room);
-    }, Math.max(200, ms));
+    room.holdTimer = setTimeout(
+      () => {
+        room.holdTimer = undefined;
+        this.drive(room);
+      },
+      Math.max(200, ms),
+    );
   }
 
   /** 投票フェイズ：各CPUが一言（交渉/告発/はったり）を述べ、投票意図を保持する。
@@ -586,11 +726,21 @@ export class RoomManager {
     const candidates = alivePlayers(s)
       .filter((p) => p.id !== botId)
       .map((p) => p.name);
-    const recent = room.chat.slice(-8).map((m) => `${m.name}: ${m.text}`).join('\n');
+    const recent = room.chat
+      .slice(-8)
+      .map((m) => `${m.name}: ${m.text}`)
+      .join('\n');
     return {
       situation,
       round: s.round,
-      voteReason: s.voteReason === 'water' ? '水不足' : s.voteReason === 'food' ? '食料不足' : s.voteReason === 'hurricane' ? 'ハリケーン' : undefined,
+      voteReason:
+        s.voteReason === 'water'
+          ? '水不足'
+          : s.voteReason === 'food'
+            ? '食料不足'
+            : s.voteReason === 'hurricane'
+              ? 'ハリケーン'
+              : undefined,
       pendingEliminations: s.pendingEliminations,
       you: me.name,
       persona: info.label,
@@ -660,6 +810,7 @@ export class RoomManager {
   private sendStateTo(room: ServerRoom, viewerId: string, socketId: string): void {
     const view = redactFor(room.state, viewerId, room.hostId);
     view.deadlineAt = room.deadlineAt;
+    view.tableMoment = room.tableMoment;
     this.io.to(socketId).emit('game:state', view);
   }
   private sendChatHistory(room: ServerRoom, socketId: string): void {
@@ -700,7 +851,10 @@ export class RoomManager {
 }
 
 export class GameError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
