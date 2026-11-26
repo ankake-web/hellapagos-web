@@ -171,6 +171,7 @@ export function App() {
   }, [view, session, recordedRoom]);
 
   const handleCreate = async (name: string, offline: boolean) => {
+    setError(null);
     setChat([]);
     sfx.current = { logId: -1, phase: '', weather: '', gameoverDone: false };
     if (offline) {
@@ -204,6 +205,7 @@ export function App() {
   };
 
   const handleJoin = async (roomId: string, name: string) => {
+    setError(null);
     setLocalRunner(null);
     localRef.current = null;
     connectSocket();
@@ -233,9 +235,9 @@ export function App() {
 
   let screen;
   if (!session || !view) {
-    screen = <Home onCreate={handleCreate} onJoin={handleJoin} stats={stats} />;
+    screen = <Home onCreate={handleCreate} onJoin={handleJoin} stats={stats} error={error} />;
   } else if (view.phase === 'lobby') {
-    screen = <Lobby view={view} onLeave={leave} offline={!!session?.offline} />;
+    screen = <Lobby view={view} roomId={session.roomId} onLeave={leave} offline={!!session.offline} />;
   } else {
     screen = <Board view={view} gathering={gather} onReveal={revealNext} chat={chat} onSay={api.say} onLeave={leave} />;
   }
@@ -253,7 +255,7 @@ export function App() {
       </button>
       {session && view && <Menu midGame={view.phase !== 'lobby'} onLeave={leave} />}
       {showConnBanner && <div className="banner warn">サーバへ接続中…</div>}
-      {error && <div className="toast">{error}</div>}
+      {error && session && view && <div className="toast" role="alert">{error}</div>}
       {screen}
     </div>
   );

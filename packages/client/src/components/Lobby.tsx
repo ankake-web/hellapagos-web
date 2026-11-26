@@ -6,20 +6,23 @@ import { BotFace, botIndexOf } from '../assets/icons.js';
 
 interface Props {
   view: PublicGameState;
+  roomId: string;
   onLeave: () => void;
   offline?: boolean;
 }
 
-export function Lobby({ view, onLeave, offline }: Props) {
+export function Lobby({ view, roomId, onLeave, offline }: Props) {
   const isHost = view.youId === view.hostId;
-  const [copied, setCopied] = useState(false);
-  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCodeOf(view)}`;
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'manual'>('idle');
+  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
 
-  const copy = () => {
-    navigator.clipboard?.writeText(shareUrl).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopyState('copied');
+    } catch {
+      setCopyState('manual');
+    }
   };
 
   const canStart = view.players.length >= MIN_PLAYERS;
@@ -29,110 +32,105 @@ export function Lobby({ view, onLeave, offline }: Props) {
     <div className="lobby">
       <div className="lobby-card">
         <div className="lobby-head">
-          <h2>ロビー</h2>
+          <div><p className="lobby-mode">{offline ? 'CPU対戦' : 'オンライン対戦'}</p><h2>出発の準備</h2></div>
           <button className="btn ghost small" onClick={onLeave}>
             退出
           </button>
         </div>
 
-        {offline ? (
-          <div className="room-code">オフライン対戦（CPU・この端末だけ）</div>
-        ) : (
+        {!offline && (
           <div className="room-code">
-            ルームID: <strong>{roomCodeOf(view)}</strong>
-            <button className="btn ghost small" onClick={copy}>
-              {copied ? 'コピーしました' : '招待URLをコピー'}
-            </button>
-          </div>
-        )}
-
-        <ul className="player-list">
-          {view.players.map((p) => (
-            <li key={p.id}>
-              <span>
-                {p.isBot && <BotFace name={p.name} index={botIndexOf(view.players, p.id)} size={22} />} {p.name}
-                {p.id === view.hostId && <span className="tag host">ホスト</span>}
-                {p.id === view.youId && <span className="tag you">あなた</span>}
-              </span>
-              {isHost && p.isBot && (
-                <button className="btn ghost small" onClick={() => api.removeBot(p.id)}>
-                  削除
-                </button>
+            <span>部屋番号 <strong>{roomId}</strong></span>
+            <button className="btn ghost" onClick={copy}>招待リンクをコピー</button>
+            {copyState === 'copied' && <p className="invite-note" role="status">リンクをコピーしました。</p>}
+            {copyState === 'manual' && (
+                <label className="field invite-note">
+                  <span>招待リンクを選択してコピー</span>
+                  <input readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} />
+                </label>
               )}
-            </li>
-          ))}
-        </ul>
-
-        <label className={`mode-row ${isHost ? '' : 'readonly'}`}>
-          <input
-            type="checkbox"
-            checked={view.config.soleSurvivor}
-            disabled={!isHost}
-            onChange={(e) => api.setConfig({ soleSurvivor: e.target.checked })}
-          />
-          <span>
-            <strong>ソロサバイバル</strong>：単独で脱出した者だけが勝者（最も殺伐）
-          </span>
-        </label>
-
-        <div className="config-row">
-          <label>
-            CPU難易度
-            <select disabled={!isHost} value={view.config.difficulty} onChange={(e) => api.setConfig({ difficulty: e.target.value as never })}>
-              <option value="easy">やさしい</option>
-              <option value="normal">ふつう</option>
-              <option value="hard">むずかしい</option>
-            </select>
-          </label>
-          <label>
-            演出スピード
-            <select disabled={!isHost} value={view.config.speed} onChange={(e) => api.setConfig({ speed: e.target.value as never })}>
-              <option value="slow">ゆっくり</option>
-              <option value="normal">ふつう</option>
-              <option value="fast">速い</option>
-            </select>
-          </label>
-          <label>
-            手番の制限時間
-            <select disabled={!isHost} value={String(view.config.timeLimit)} onChange={(e) => api.setConfig({ timeLimit: Number(e.target.value) })}>
-              <option value="0">なし</option>
-              <option value="60">1分</option>
-              <option value="120">2分</option>
-              <option value="180">3分</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="lobby-actions">
-          {isHost ? (
-            <>
-              <button className="btn" disabled={!canAdd} onClick={() => api.addBot()}>
-                ＋ AIボットを追加
-              </button>
-              <button className="btn primary" disabled={!canStart} onClick={() => api.start()}>
-                ゲーム開始（{view.players.length}人）
-              </button>
-              {!canStart && <p className="hint">あと{MIN_PLAYERS - view.players.length}人必要です。</p>}
-            </>
-          ) : (
-            <p className="hint">ホストの開始を待っています…（{view.players.length}人）</p>
+            </div>
           )}
-        </div>
+
+          <div className="lobby-roster">
+            <h3>参加者 <span>{view.players.length} / {MAX_PLAYERS}人</span></h3>
+            <p className="hint">{isHost ? '空いている席にはCPUを追加できる。' : '参加者がそろうと開始できます。'}</p>
+            <ul className="player-list">
+              {view.players.map((p) => (
+                <li key={p.id}>
+                  <span>
+                    {p.isBot && <BotFace name={p.name} index={botIndexOf(view.players, p.id)} size={22} />} {p.name}
+                    {p.id === view.hostId && <span className="tag host">ホスト</span>}
+                    {p.id === view.youId && <span className="tag you">あなた</span>}
+                  </span>
+                  {isHost && p.isBot && (
+                    <button className="btn ghost small" onClick={() => api.removeBot(p.id)}>
+                      削除
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="lobby-actions">
+            {isHost ? (
+              <>
+                <button className="btn" disabled={!canAdd} onClick={() => api.addBot()}>CPUを追加</button>
+                <button className="btn primary" disabled={!canStart} onClick={() => api.start()}>
+                  ゲーム開始（{view.players.length}人）
+                </button>
+                {!canStart && <p className="hint" role="status">あと{MIN_PLAYERS - view.players.length}人必要です。</p>}
+              </>
+            ) : (
+              <p className="hint" role="status">ホストの開始を待っています…</p>
+            )}
+          </div>
+
+          <details className="lobby-settings">
+            <summary>対戦設定</summary>
+          <label className={`mode-row ${isHost ? '' : 'readonly'}`}>
+            <input
+              type="checkbox"
+              checked={view.config.soleSurvivor}
+              disabled={!isHost}
+              onChange={(e) => api.setConfig({ soleSurvivor: e.target.checked })}
+            />
+            <span>
+              <strong>ソロサバイバル</strong>　単独で脱出した人だけが勝者
+            </span>
+          </label>
+
+          <div className="config-row">
+            <label>
+              CPU難易度
+              <select disabled={!isHost} value={view.config.difficulty} onChange={(e) => api.setConfig({ difficulty: e.target.value as never })}>
+                <option value="easy">やさしい</option>
+                <option value="normal">ふつう</option>
+                <option value="hard">むずかしい</option>
+              </select>
+            </label>
+            <label>
+              演出スピード
+              <select disabled={!isHost} value={view.config.speed} onChange={(e) => api.setConfig({ speed: e.target.value as never })}>
+                <option value="slow">ゆっくり</option>
+                <option value="normal">ふつう</option>
+                <option value="fast">速い</option>
+              </select>
+            </label>
+            <label>
+              手番の制限時間
+              <select disabled={!isHost} value={String(view.config.timeLimit)} onChange={(e) => api.setConfig({ timeLimit: Number(e.target.value) })}>
+                <option value="0">なし</option>
+                <option value="60">1分</option>
+                <option value="120">2分</option>
+                <option value="180">3分</option>
+              </select>
+            </label>
+          </div>
+
+        </details>
       </div>
     </div>
   );
-}
-
-// 公開状態にはルームIDが直接含まれないため、招待URLは現在のURLのクエリを優先しつつ
-// localStorage 経由のセッションを使う。ここでは表示用に URL/保存値から復元する。
-function roomCodeOf(_view: PublicGameState): string {
-  const fromUrl = new URLSearchParams(window.location.search).get('room');
-  if (fromUrl) return fromUrl.replace(/\D/g, '');
-  try {
-    const raw = localStorage.getItem('hellapagos.session');
-    if (raw) return (JSON.parse(raw) as { roomId: string }).roomId;
-  } catch {
-    /* ignore */
-  }
-  return '----';
 }

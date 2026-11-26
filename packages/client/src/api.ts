@@ -20,12 +20,15 @@ export async function fetchLeaderboard(limit = 20): Promise<LeaderboardEntry[]> 
 
 type Config = { soleSurvivor?: boolean; difficulty?: Difficulty; speed?: Speed; timeLimit?: number };
 
+const ROOM_ACK_TIMEOUT = 90_000;
+const roomTimeout = (): Ack => ({ ok: false, error: '部屋に接続できませんでした。時間をおいて再度お試しください。' });
+
 export const api = {
   createRoom: (name: string) =>
     local
       ? Promise.resolve<Ack>(local.createRoom(name))
-      : new Promise<Ack>((r) => socket.emit('room:create', { name }, r)),
-  joinRoom: (roomId: string, name: string) => new Promise<Ack>((r) => socket.emit('room:join', { roomId, name }, r)),
+      : socket.timeout(ROOM_ACK_TIMEOUT).emitWithAck('room:create', { name }).catch(roomTimeout),
+  joinRoom: (roomId: string, name: string) => socket.timeout(ROOM_ACK_TIMEOUT).emitWithAck('room:join', { roomId, name }).catch(roomTimeout),
   rejoin: (roomId: string, playerId: string) =>
     new Promise<Ack>((r) => socket.emit('room:rejoin', { roomId, playerId }, r)),
   leaveRoom: () => (local ? local.dispose() : socket.emit('room:leave')),

@@ -70,7 +70,7 @@
   font: 800 .75rem/1.35 var(--font); text-align: center; color: #10303a; background: #fff3d0; box-shadow: 0 1px 3px #13211b9e;
 }
 .gather-mat-foot { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 40px; font: 700 .8rem var(--font); color: #eee6ca; font-variant-numeric: tabular-nums; }
-.gather-draw { min-height: 38px; padding: 5px 16px; cursor: pointer; border-radius: 20px; border: 1px solid #e5c888; background: #f4dfaf; color: #283e35; font: 700 .85rem var(--font); }
+.gather-draw { min-height: 44px; padding: 5px 16px; cursor: pointer; border-radius: 20px; border: 1px solid #e5c888; background: #f4dfaf; color: #283e35; font: 700 .85rem var(--font); }
 .gather-draw:active { transform: translateY(1px); background: #ccae74; }
 .gather-waterware { display: flex; align-items: center; gap: 18px; padding: 6px 0; }
 .gather-weather-card { display: grid; place-items: center; width: 49px; height: 62px; border: 3px solid #d4bc90; background: #ecdfbd; border-radius: 6px; box-shadow: 0 3px 5px #13252cb3; transform: rotate(-10deg); }
@@ -108,7 +108,7 @@
   .gather-mat { margin: 5px 8px 8px; padding: 5px 9px; }
   .gather-pieces { min-height: 65px; gap: 16px; }
   .gather-socket { width: clamp(30px, 8vw, 40px); }
-  .gather-mat-foot { min-height: 36px; }
+  .gather-mat-foot { min-height: 44px; }
   .gather-waterware { padding: 0; }
 }
 @media (prefers-reduced-motion: reduce) {

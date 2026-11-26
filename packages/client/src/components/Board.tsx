@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type {
   ActionType,
   Card,
@@ -8,7 +8,7 @@ import type {
   PublicGameState,
   PublicPlayer,
 } from '@hellapagos/shared';
-import { ACTION_SCENE, CARD_INFO, PERSONA_INFO, RAFT_LOOP } from '@hellapagos/shared';
+import { ACTION_SCENE, CARD_INFO, PERSONA_INFO, RAFT_LOOP, presentationTiming } from '@hellapagos/shared';
 import { api } from '../api.js';
 import { BotFace, GameIcon, UiIcon, botIndexOf } from '../assets/icons.js';
 import { ART } from '../assets/manifest.js';
@@ -71,6 +71,22 @@ export function Board({ view, gathering, onReveal, chat, onSay, onLeave }: Props
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [tab, setTab] = useState<'log' | 'chat'>('log');
   const freshDraw = useFreshDraw(view, gathering);
+  const targetBanner = useRef<HTMLDivElement>(null);
+  const [introducedRound, setIntroducedRound] = useState(0);
+  const introMs = presentationTiming(view.config.speed).round;
+  const roundIntro = view.round !== introducedRound && view.phase !== 'gameover';
+
+  useEffect(() => {
+    if (!roundIntro) return;
+    const timer = window.setTimeout(() => setIntroducedRound(view.round), introMs);
+    return () => window.clearTimeout(timer);
+  }, [roundIntro, view.round, introMs]);
+
+  useEffect(() => {
+    if (!targeting) return;
+    targetBanner.current?.focus({ preventScroll: true });
+    targetBanner.current?.scrollIntoView({ block: 'nearest' });
+  }, [targeting]);
 
   useEffect(() => {
     setTargeting(null);
@@ -99,29 +115,33 @@ export function Board({ view, gathering, onReveal, chat, onSay, onLeave }: Props
   return (
     <div className={`board ${weatherClass}`}>
       <Header view={view} />
+      <Tracks view={view} />
       <TableTheater view={view} gathering={gathering} onReveal={onReveal} />
-      <HandBar me={me} onSelect={setSelectedCard} />
       <WeatherFX view={view} />
-      <RoundSplash view={view} />
+      {roundIntro && <RoundSplash view={view} duration={introMs} />}
       <DrawCenter view={view} draw={freshDraw} />
       <WoodSplash view={view} draw={freshDraw} />
       <EventFX view={view} />
       <FlyLayer view={view} />
-      {targeting && (
-        <div className="banner target">
-          <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} />{' '}
-          {targeting.mode === 'gun' ? '撃つ相手' : targeting.mode === 'telescope' ? 'のぞき見る相手' : '蘇生する相手'}
-          を選択
-          <button className="btn ghost small" onClick={() => setTargeting(null)}>
-            キャンセル
-          </button>
-        </div>
-      )}
       <div className="board-main">
         <div className="board-left">
-          <Tracks view={view} />
-          <PlayerGrid view={view} draw={freshDraw} targetable={targetable} onPick={pickTarget} />
-          <PhasePanel view={view} me={me} />
+          {roundIntro ? <div className="panel table-wait" role="status">天気を確認中…</div> :
+            !targeting && <PhasePanel view={view} me={me} />}
+          <HandBar me={me} onSelect={setSelectedCard} />
+          {targeting && (
+            <div className="banner target" tabIndex={-1} ref={targetBanner}>
+              <GameIcon name={targeting.card.kind} size={22} fallback={CARD_INFO[targeting.card.kind].icon} />{' '}
+              {targeting.mode === 'gun' ? '撃つ相手' : targeting.mode === 'telescope' ? 'のぞき見る相手' : '蘇生する相手'}
+              を選択
+              <button className="btn ghost small" onClick={() => setTargeting(null)}>
+                キャンセル
+              </button>
+            </div>
+          )}
+          <section className="crew-section" aria-labelledby="crew-heading">
+            <h2 id="crew-heading">生存者・参加者</h2>
+            <PlayerGrid view={view} draw={freshDraw} targetable={targetable} onPick={pickTarget} />
+          </section>
         </div>
         <div className={`board-right tab-${tab}`}>
           <div className="right-tabs">
@@ -170,16 +190,25 @@ export function Board({ view, gathering, onReveal, chat, onSay, onLeave }: Props
 function TableTheater({ view, gathering, onReveal }: Pick<Props, 'view' | 'gathering' | 'onReveal'>) {
   const theaterRef = useRef<HTMLElement>(null);
   const m = view.tableMoment;
+  const ownGather = gathering?.playerId === view.youId && Boolean(gathering);
+  useLayoutEffect(() => {
+    const el = theaterRef.current;
+    if (!ownGather || !el) return;
+    const box = el.getBoundingClientRect();
+    if (box.top < 0 || box.bottom > window.innerHeight) {
+      el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }, [ownGather, gathering?.id, gathering?.settled]);
   useEffect(() => {
     const el = theaterRef.current;
-    if (!m || !el) return;
+    if (!m || !el || ownGather) return;
     const box = el.getBoundingClientRect();
     if (box.bottom < 80 || box.top < 0 || box.top > window.innerHeight - 80)
       el.scrollIntoView({
         block: 'start',
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
       });
-  }, [m?.id]);
+  }, [m?.id, ownGather]);
   const actor = view.players.find((p) => p.id === (m?.playerId ?? view.currentActorId));
   const me = view.players.find((p) => p.isYou);
   const stage = m?.stage ?? (view.isYourTurn ? 'your-turn' : 'waiting');
@@ -461,39 +490,36 @@ function Header({ view }: { view: PublicGameState }) {
   );
 }
 
-/** 食料・水を上段に2分割、船を下段に大きく表示する。 */
+/** 配給と脱出に必要な備蓄を並べて表示する。 */
 function Tracks({ view }: { view: PublicGameState }) {
   const need = view.seatsNeeded;
   return (
-    <div className="tracks">
-      <div className="tracks-top">
-        <ResCell
-          icon="fish"
-          value={view.food}
-          need={need}
-          flyKey="food"
-          title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`}
-        />
-        <ResCell
-          icon="water"
-          value={view.water}
-          need={need}
-          flyKey="water"
-          title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`}
-        />
-      </div>
+    <section className="tracks" aria-label="島の備蓄">
+      <ResCell
+        icon="fish"
+        value={view.food}
+        need={need}
+        flyKey="food"
+        title={`食料 ${view.food} / 必要${need}（上限${view.foodCap}）`}
+      />
+      <ResCell
+        icon="water"
+        value={view.water}
+        need={need}
+        flyKey="water"
+        title={`水 ${view.water} / 必要${need}（上限${view.waterCap}）`}
+      />
       <ResCell
         icon="ship"
         value={view.raftSeats}
         need={need}
         flyKey="raft"
         raft
-        big
         progress={view.raftProgress}
-        sub={`次の席まで あと木 ${RAFT_LOOP - view.raftProgress} 本`}
+        sub={`あと木${RAFT_LOOP - view.raftProgress}本で1席`}
         title={`船 ${view.raftSeats} / ${need}（木${RAFT_LOOP}で+1）`}
       />
-    </div>
+    </section>
   );
 }
 
@@ -534,7 +560,6 @@ function ResCell({
   need,
   flyKey,
   raft,
-  big,
   sub,
   title,
   progress,
@@ -544,7 +569,6 @@ function ResCell({
   need: number;
   flyKey: string;
   raft?: boolean;
-  big?: boolean;
   sub?: string;
   title?: string;
   /** 船だけ：次の席までの木の進み（0..RAFT_LOOP-1）。 */
@@ -553,11 +577,11 @@ function ResCell({
   const short = value < need;
   return (
     <div
-      className={`rcell ${raft ? 'raft' : ''} ${big ? 'big' : ''} ${short ? 'short' : 'ok'}`}
+      className={`rcell ${raft ? 'raft' : ''} ${short ? 'short' : 'ok'}`}
       data-fly={flyKey}
       title={title}
     >
-      <GameIcon name={icon} size={big ? 64 : 44} className="rcell-ic" />
+      <GameIcon name={icon} size={38} className="rcell-ic" />
       <div className="rcell-body">
         <span className="resource-title">{icon === 'fish' ? '食料' : icon === 'water' ? '水' : 'いかだ'}</span>
         <div className="rcell-num">
@@ -757,6 +781,7 @@ function actionConfirm(
 
 function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) {
   const [wood, setWood] = useState(0);
+  const [woodOpen, setWoodOpen] = useState(false);
   // 行動はワンタップで確定してしまうので、確認シートを1枚挟む
   const [confirm, setConfirm] = useState<{ action: ActionType; wood: number } | null>(null);
   if (me.resting) return <div className="panel">ヘビの毒で今ラウンドは動けません。</div>;
@@ -776,20 +801,15 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
     setConfirm(null);
   };
   const ask = (action: ActionType, n = 0) => {
-    if (action === 'wood' && n > 0) {
-      playSound('click');
-      setConfirm({ action, wood: n });
-    } else {
-      playSound(action === 'search' ? 'search' : 'click');
-      api.choose(action, n);
-    }
+    playSound(action === 'search' ? 'search' : 'click');
+    setConfirm({ action, wood: n });
   };
   const meta = confirm ? actionConfirm(view, confirm.action, confirm.wood) : null;
   return (
     <div className="panel yourturn">
-      <h3>あなたの番です — 行動を選ぶ</h3>
+      <h3>あなたの行動を選ぶ</h3>
       <div className="action-grid">
-        <div className="action-row3">
+        <div className="action-options">
           <button className="btn action" onClick={() => ask('fish')}>
             <GameIcon name={ACTION_ICON.fish} size={34} />
             <span className="act-name">{ACTION_LABEL.fish}</span>
@@ -812,18 +832,16 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
               {view.wreckageRemaining ?? '?'}枚
             </span>
           </button>
+          <button className="btn action" aria-expanded={woodOpen} aria-controls="wood-options" onClick={() => setWoodOpen(!woodOpen)}>
+            <GameIcon name={ACTION_ICON.wood} size={34} />
+            <span className="act-name">{ACTION_LABEL.wood}</span>
+            <span className="sub">安全に{me.permanents.includes('axe') ? 2 : 1}本</span>
+          </button>
         </div>
-        <div className="btn action wood-action">
-          <div className="wood-head">
-            <GameIcon name={ACTION_ICON.wood} size={40} />
-            <div className="wood-head-txt">
-              <span className="act-name">{ACTION_LABEL.wood}</span>
-              <span className="sub">まず木1本（斧で2本）確定。さらに引くとヘビ（病気）の危険。</span>
-            </div>
-          </div>
+        <div className="wood-action" id="wood-options" hidden={!woodOpen}>
           <div className="wood-push">
             <label>
-              さらに引く本数：{wood} 本（0〜5）
+              追加で引く木　{wood}本（0〜5）
               <input type="range" min={0} max={5} value={wood} onChange={(e) => setWood(Number(e.target.value))} />
             </label>
             {/* 危険度メーター：数字だけだと「5本」の重さが伝わらないので玉の数で見せる */}
@@ -843,9 +861,6 @@ function ActionPanel({ view, me }: { view: PublicGameState; me: PublicPlayer }) 
           </div>
         </div>
       </div>
-      <p className="hint">
-        ヘビに噛まれるのは<strong>木集めの追加引きだけ</strong>。釣りの黒玉は魚3匹で、病気にはなりません。
-      </p>
       {confirm && meta && (
         <ConfirmModal
           title={meta.title}
@@ -1520,18 +1535,7 @@ function Chat({ view, chat, onSay }: { view: PublicGameState; chat: ChatMessage[
 }
 
 /** ラウンド開始時に「その日の天気」を画面いっぱいに大きく見せる演出（常時の雨ライン表示の代わり）。 */
-function RoundSplash({ view }: { view: PublicGameState }) {
-  const [show, setShow] = useState(false);
-  const ref = useRef(0);
-  useEffect(() => {
-    if (view.phase === 'lobby' || view.phase === 'gameover') return;
-    if (view.round === ref.current) return;
-    ref.current = view.round;
-    setShow(true);
-    const id = window.setTimeout(() => setShow(false), 1900);
-    return () => window.clearTimeout(id);
-  }, [view.round]);
-  if (!show) return null;
+function RoundSplash({ view, duration }: { view: PublicGameState; duration: number }) {
   const wxName = view.hurricaneRevealed
     ? 'wx-hurricane'
     : view.currentPrecip === 0
@@ -1542,7 +1546,7 @@ function RoundSplash({ view }: { view: PublicGameState }) {
   const wClass = view.hurricaneRevealed ? 'storm' : view.currentPrecip === 0 ? 'sun' : 'rain';
   return (
     <div className="weather-reveal" aria-hidden>
-      <div className={`wr-card ${wClass}`}>
+      <div className={`wr-card ${wClass}`} style={{ animationDuration: `${duration}ms` }}>
         <span className="wr-round">{view.round}ラウンド目</span>
         <GameIcon name={wxName} size={104} className="wr-icon" />
         <span className="wr-weather">{weatherLabel(view)}</span>
